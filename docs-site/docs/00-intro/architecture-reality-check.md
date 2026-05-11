@@ -29,7 +29,7 @@ country. This workshop teaches both.
 
 Used by every hands-on lab in M1–M6. The full Terraform that creates it
 is in
-[`infra/`](https://github.com/adindaputra/hybrid-ai-platform-workshop/tree/main/infra).
+[`infra/`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/tree/main/infra).
 
 | Component | Region | Tier |
 | --- | --- | --- |
@@ -125,7 +125,7 @@ cd hybrid-ai-platform-workshop
 ```
 
 If any check fails, see the
-[troubleshooting guide](https://github.com/adindaputra/hybrid-ai-platform-workshop/blob/main/scripts/smoke-test.sh)
+[troubleshooting guide](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/scripts/smoke-test.sh)
 or ask your facilitator.
 
 ## Next

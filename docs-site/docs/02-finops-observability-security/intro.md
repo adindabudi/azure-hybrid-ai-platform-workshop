@@ -16,7 +16,7 @@ In this 60-minute module you will:
   AKS-hosted container path, and understand when to use each.
 
 The full policy bundle for this module is at
-[`policies/workshop-llm-policy.xml`](https://github.com/adindaputra/hybrid-ai-platform-workshop/blob/main/policies/workshop-llm-policy.xml).
+[`policies/workshop-llm-policy.xml`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/policies/workshop-llm-policy.xml).
 
 ## Prerequisites
 
@@ -278,7 +278,7 @@ az apim nv create -g "$RG" --service-name "$APIM" \
 ```
 
 Replace the `<llm-content-safety>` block with the contents of
-[`policies/llm-content-safety-selfhosted.xml`](https://github.com/adindaputra/hybrid-ai-platform-workshop/blob/main/policies/llm-content-safety-selfhosted.xml).
+[`policies/llm-content-safety-selfhosted.xml`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/policies/llm-content-safety-selfhosted.xml).
 That fragment calls `text:shieldPrompt` first (jailbreak detection), then
 `text:analyze` for the four harm categories, and returns `403` on the
 first hit.

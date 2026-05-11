@@ -8,11 +8,11 @@ const config: Config = {
   favicon: 'img/favicon.svg',
 
   // Update these to match your fork before the first GitHub Pages deploy.
-  url: 'https://adindaputra.github.io',
-  baseUrl: '/hybrid-ai-platform-workshop/',
+  url: 'https://adindabudi.github.io',
+  baseUrl: '/azure-hybrid-ai-platform-workshop/',
 
-  organizationName: 'adindaputra',
-  projectName: 'hybrid-ai-platform-workshop',
+  organizationName: 'adindabudi',
+  projectName: 'azure-hybrid-ai-platform-workshop',
   trailingSlash: false,
 
   onBrokenLinks: 'warn',
@@ -31,7 +31,7 @@ const config: Config = {
           routeBasePath: '/',
           sidebarPath: './sidebars.ts',
           editUrl:
-            'https://github.com/adindaputra/hybrid-ai-platform-workshop/edit/main/docs-site/',
+            'https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/edit/main/docs-site/',
         },
         blog: false,
         theme: {
@@ -57,7 +57,7 @@ const config: Config = {
           label: 'Workshop',
         },
         {
-          href: 'https://github.com/adindaputra/hybrid-ai-platform-workshop',
+          href: 'https://github.com/adindabudi/azure-hybrid-ai-platform-workshop',
           label: 'GitHub',
           position: 'right',
         },

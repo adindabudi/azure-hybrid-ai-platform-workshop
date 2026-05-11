@@ -118,7 +118,7 @@ Each module has:
 - A **"What you just built"** section that explains the design choices.
 
 You can run every lab on your laptop against the shared workshop landing
-zone, or fork [the repo](https://github.com/adindaputra/hybrid-ai-platform-workshop)
+zone, or fork [the repo](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop)
 and redeploy the whole stack in your own Azure subscription.
 
 Ready? Start with [M0 — Setup](./intro/setup).

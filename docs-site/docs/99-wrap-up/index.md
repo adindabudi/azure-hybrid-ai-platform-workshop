@@ -121,7 +121,7 @@ This removes all 90+ resources except the resource group itself
 
 ## Take it further
 
-- Fork the [repo](https://github.com/adindaputra/hybrid-ai-platform-workshop)
+- Fork the [repo](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop)
   and redeploy the whole stack in your own Azure subscription. Every
   module is reproducible end-to-end.
 - Run it again with `attendee_count=1` for the worst-case
@@ -132,7 +132,7 @@ This removes all 90+ resources except the resource group itself
 
 ## Reference
 
-- [Workshop repo](https://github.com/adindaputra/hybrid-ai-platform-workshop)
+- [Workshop repo](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop)
 - [APIM AI gateway capabilities](https://learn.microsoft.com/azure/api-management/genai-gateway-capabilities)
 - [Microsoft Agent Framework docs](https://learn.microsoft.com/agent-framework/)
 - [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)

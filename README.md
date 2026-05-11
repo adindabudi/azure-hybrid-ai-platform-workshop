@@ -153,7 +153,7 @@ To preview locally:
 ```bash
 cd docs-site
 npm install
-npm run start          # http://localhost:3000/hybrid-ai-platform-workshop/
+npm run start          # http://localhost:3000/azure-hybrid-ai-platform-workshop/
 ```
 
 Before the first deploy, edit

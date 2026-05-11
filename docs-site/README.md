@@ -9,7 +9,7 @@ Hosted on GitHub Pages from `main`. CI lives in
 cd docs-site
 npm install
 npm run start
-# open http://localhost:3000/hybrid-ai-platform-workshop/
+# open http://localhost:3000/azure-hybrid-ai-platform-workshop/
 ```
 
 ## Build for production

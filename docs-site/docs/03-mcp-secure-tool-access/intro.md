@@ -40,7 +40,7 @@ The official APIM-MCP integration is documented at
 
 ## Step 1 — Deploy the sample MCP server
 
-The repo's [`apps/mcp-customer-tool/`](https://github.com/adindaputra/hybrid-ai-platform-workshop/tree/main/apps/mcp-customer-tool)
+The repo's [`apps/mcp-customer-tool/`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/tree/main/apps/mcp-customer-tool)
 directory has a Python FastMCP server that exposes a `lookup_customer`
 tool against a synthetic dataset.
 
@@ -148,7 +148,7 @@ az ad app update --id "$MCP_APP_ID" \
 ```
 
 Apply this policy to your MCP API
-([file](https://github.com/adindaputra/hybrid-ai-platform-workshop/blob/main/policies/mcp-oauth-pkce.xml)):
+([file](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/policies/mcp-oauth-pkce.xml)):
 
 ```xml
 <policies>

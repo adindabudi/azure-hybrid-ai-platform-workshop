@@ -25,7 +25,7 @@ In this 55-minute hands-on module you will:
 - Your APIM subscription key in `apim-credentials` secret.
 
 The full XML for every policy in this module is in
-[`policies/`](https://github.com/adindaputra/hybrid-ai-platform-workshop/tree/main/policies)
+[`policies/`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/tree/main/policies)
 in the repo. Each fragment has been **schema-validated offline** against
 the May 2026 Microsoft Learn reference.
 
@@ -414,7 +414,7 @@ az apim backend update \
 ## Step 8 — Verify every policy with one script
 
 The repo ships a verifier at
-[`scripts/verify-policies.sh`](https://github.com/adindaputra/hybrid-ai-platform-workshop/blob/main/scripts/verify-policies.sh).
+[`scripts/verify-policies.sh`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/scripts/verify-policies.sh).
 Run it after Steps 1–7 to confirm every applied policy is doing its job.
 
 ```bash
@@ -455,7 +455,7 @@ code. Now you can ship 30 apps and only worry about prompts.
 
 ## Reference
 
-- All policy fragments: [`policies/`](https://github.com/adindaputra/hybrid-ai-platform-workshop/tree/main/policies)
+- All policy fragments: [`policies/`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/tree/main/policies)
 - [APIM `llm-token-limit` policy](https://learn.microsoft.com/azure/api-management/llm-token-limit-policy)
 - [APIM `llm-semantic-cache-lookup` policy](https://learn.microsoft.com/azure/api-management/llm-semantic-cache-lookup-policy)
 - [APIM `llm-semantic-cache-store` policy](https://learn.microsoft.com/azure/api-management/llm-semantic-cache-store-policy)
