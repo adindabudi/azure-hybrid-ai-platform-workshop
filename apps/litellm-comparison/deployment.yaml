@@ -67,7 +67,11 @@ spec:
           type: RuntimeDefault
       containers:
         - name: proxy
-          image: ghcr.io/berriai/litellm:main-stable
+          # Mirrored from ghcr.io/berriai/litellm:main-stable into the
+          # workshop ACR so attendees pull from a private registry that
+          # already has an AcrPull role binding from the AKS kubelet
+          # identity — no Docker Hub / GHCR rate-limit drama.
+          image: ${ACR_LOGIN_SERVER}/litellm:main-stable
           imagePullPolicy: IfNotPresent
           args: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
           ports:

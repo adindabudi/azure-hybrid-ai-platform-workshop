@@ -38,7 +38,10 @@ spec:
           effect: NoSchedule
       containers:
         - name: text-analyze
-          image: mcr.microsoft.com/azure-cognitive-services/contentsafety/text-analyze:latest
+          # Mirrored from mcr.microsoft.com/azure-cognitive-services/contentsafety/text-analyze:latest
+          # into the workshop ACR. AKS kubelet identity has AcrPull on the
+          # ACR, so no imagePullSecret is needed.
+          image: ${ACR_LOGIN_SERVER}/contentsafety-text-analyze:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5000

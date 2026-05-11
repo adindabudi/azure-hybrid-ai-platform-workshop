@@ -285,37 +285,120 @@ in for any request that doesn't pass `x-auth-mode: anonymous`.
 Tell attendees the workshop accepts anonymous traffic when they add the
 header. In production you'd remove the `<choose>` wrapper.
 
-## M3 — MCP (per attendee)
+## Container images — populate the ACR (once per workshop)
 
-### Build and push the MCP image (once per workshop)
-
-Before any attendee can deploy `apps/mcp-customer-tool/deployment.yaml`,
-the image referenced by it (`${ACR_LOGIN_SERVER}/mcp-customer-tool:1.0`)
-must exist in the workshop ACR. Use `az acr build` so you don't need
-Docker installed locally:
+The workshop manifests (`apps/mcp-customer-tool/`, `apps/litellm-comparison/`,
+`apps/content-safety-cpu/`) all reference `${ACR_LOGIN_SERVER}/...` so AKS
+pulls from the workshop ACR via the kubelet identity's `AcrPull` role.
+Three images must be present before any attendee deploys.
 
 ```bash
 ACR_NAME=$(az acr list -g "$RG" --query "[0].name" -o tsv)
 ACR_LOGIN_SERVER=$(az acr list -g "$RG" --query "[0].loginServer" -o tsv)
-echo "Building into $ACR_LOGIN_SERVER ..."
+echo "Populating $ACR_LOGIN_SERVER ..."
+```
 
+### 1. Build `mcp-customer-tool:1.0` from source
+
+ACR Tasks (`az acr build`) is not available in every region (e.g. it
+fails in `indonesiacentral` with `NoRegisteredProviderFound`). If your
+ACR is in a supported region, use ACR Tasks — no local Docker needed:
+
+```bash
 az acr build \
   --registry "$ACR_NAME" \
   --image mcp-customer-tool:1.0 \
+  --image mcp-customer-tool:latest \
   apps/mcp-customer-tool
-
-# Verify
-az acr repository show-tags -n "$ACR_NAME" --repository mcp-customer-tool -o tsv
-# Expected: 1.0
 ```
 
-Then make sure each AKS node pool has `AcrPull` on the registry (the
-Terraform in `infra/` already does this — re-run `terraform apply` if
-the role assignment is missing).
+If `az acr build` returns `NoRegisteredProviderFound` for your region,
+fall back to `docker buildx`:
 
-Tell attendees in their handout what `ACR_LOGIN_SERVER` is, or the
-`az acr list` snippet in [M3 Step 1](../mcp-secure-tool-access/intro)
-will discover it automatically.
+```bash
+az acr login --name "$ACR_NAME"
+docker buildx build --platform linux/amd64 \
+  -t "${ACR_LOGIN_SERVER}/mcp-customer-tool:1.0" \
+  -t "${ACR_LOGIN_SERVER}/mcp-customer-tool:latest" \
+  --push apps/mcp-customer-tool
+```
+
+### 2. Mirror the two public images into ACR
+
+`az acr import` runs server-side, so neither command needs Docker:
+
+```bash
+az acr import --name "$ACR_NAME" --force \
+  --source ghcr.io/berriai/litellm:main-stable \
+  --image litellm:main-stable
+
+az acr import --name "$ACR_NAME" --force \
+  --source mcr.microsoft.com/azure-cognitive-services/contentsafety/text-analyze:latest \
+  --image contentsafety-text-analyze:latest
+```
+
+### 3. Verify
+
+```bash
+az acr repository list -n "$ACR_NAME" -o table
+# Expect: contentsafety-text-analyze, litellm, mcp-customer-tool
+
+for r in mcp-customer-tool litellm contentsafety-text-analyze; do
+  echo "=== $r ==="
+  az acr repository show-tags -n "$ACR_NAME" --repository "$r" -o tsv
+done
+```
+
+### 4. Smoke-test the pulls from AKS
+
+Validates the kubelet identity's `AcrPull` binding really works end to
+end. The content-safety image is ~8.8 GB — first pull can take 2–3 min.
+
+```bash
+NS=attendee-01
+kubectl delete pod -n "$NS" pull-test-mcp pull-test-litellm pull-test-cs \
+  --ignore-not-found=true
+
+cat <<EOF | kubectl apply -n "$NS" -f -
+apiVersion: v1
+kind: Pod
+metadata: { name: pull-test-mcp }
+spec:
+  restartPolicy: Never
+  containers:
+  - { name: c, image: "${ACR_LOGIN_SERVER}/mcp-customer-tool:1.0",
+      command: ["/bin/sh","-c","echo pull-ok; sleep 3"] }
+---
+apiVersion: v1
+kind: Pod
+metadata: { name: pull-test-litellm }
+spec:
+  restartPolicy: Never
+  containers:
+  - { name: c, image: "${ACR_LOGIN_SERVER}/litellm:main-stable",
+      command: ["/bin/sh","-c","echo pull-ok; sleep 3"] }
+---
+apiVersion: v1
+kind: Pod
+metadata: { name: pull-test-cs }
+spec:
+  restartPolicy: Never
+  containers:
+  - { name: c, image: "${ACR_LOGIN_SERVER}/contentsafety-text-analyze:latest",
+      command: ["/bin/sh","-c","echo pull-ok; sleep 3"] }
+EOF
+
+kubectl wait -n "$NS" --for=jsonpath='{.status.phase}'=Running \
+  pod/pull-test-mcp pod/pull-test-litellm pod/pull-test-cs --timeout=600s
+
+kubectl delete pod -n "$NS" pull-test-mcp pull-test-litellm pull-test-cs
+```
+
+If any pod stays in `ImagePullBackOff`, double-check the kubelet
+identity has `AcrPull` on the ACR scope — the Terraform in `infra/`
+sets this; re-run `terraform apply` if it's missing.
+
+## M3 — MCP (per attendee)
 
 ### Register MCP backends behind APIM
 
