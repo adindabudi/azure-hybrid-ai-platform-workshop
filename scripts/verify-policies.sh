@@ -1,7 +1,26 @@
 #!/usr/bin/env bash
 # verify-policies.sh — end-to-end verifier for the APIM policies applied in M1 + M2.
 #
-# Run AFTER each module to confirm every policy is doing its job.
+# Designed to run from an attendee's laptop (no Terraform state required).
+# Required env vars (set from the handout `scripts/print-attendee-handout.sh`
+# produced for you):
+#
+#   APIM_GATEWAY_URL   e.g. https://aigw-xxx.azure-api.net
+#   APIM_KEY           your attendee subscription key
+#
+# Optional env vars (set only by facilitators with reader access on the RG):
+#   RG                          resource group name
+#   APIM_NAME                   APIM service name
+#   LOG_ANALYTICS_WORKSPACE_ID  workspace id (for the App Insights metric check)
+#
+# Without the optional vars, control-plane checks (az apim show, LAW query)
+# are skipped instead of failed — attendees only see the data-plane checks
+# they can actually run.
+#
+# Optional override:
+#   MODEL_DEPLOY (default: gpt-5-mini)   AOAI deployment name in the API path
+#
+# Usage:
 #   ./scripts/verify-policies.sh         # M1 only
 #   ./scripts/verify-policies.sh --m2    # M1 + M2 (content safety + JWT)
 #
@@ -9,50 +28,56 @@
 
 set -u
 
-INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../infra" && pwd)"
-cd "$INFRA_DIR"
+# ----- Required env -----
+: "${APIM_GATEWAY_URL:?APIM_GATEWAY_URL not set. Export it from your handout.}"
+: "${APIM_KEY:?APIM_KEY not set. Export it from your handout.}"
 
-RG=$(terraform output -raw resource_group_name 2>/dev/null)
-APIM=$(terraform output -raw apim_name 2>/dev/null)
-APIM_GW=$(terraform output -raw apim_gateway_url 2>/dev/null)
-
-if [[ -z "${APIM_KEY:-}" ]]; then
-  # Pull from the first attendee's secret if running on AKS
-  APIM_KEY=$(kubectl get secret apim-credentials \
-    -n attendee-01 -o jsonpath='{.data.subscription-key}' 2>/dev/null | base64 -d)
-fi
-
-if [[ -z "${APIM_KEY}" || -z "${APIM_GW}" ]]; then
-  echo "✗ APIM_KEY or APIM_GATEWAY unset. Run from a kubectl context with attendee secret, or export APIM_KEY first." >&2
-  exit 1
-fi
+# ----- Optional env -----
+MODEL_DEPLOY="${MODEL_DEPLOY:-gpt-5-mini}"
+RG="${RG:-}"
+APIM_NAME="${APIM_NAME:-}"
+LOG_ANALYTICS_WORKSPACE_ID="${LOG_ANALYTICS_WORKSPACE_ID:-}"
 
 INCLUDE_M2=0
 [[ "${1:-}" == "--m2" ]] && INCLUDE_M2=1
 
 FAILS=0
+SKIPS=0
 green()  { printf '\033[32m✓\033[0m %s\n' "$1"; }
 red()    { printf '\033[31m✗\033[0m %s\n' "$1"; FAILS=$((FAILS+1)); }
+yellow() { printf '\033[33m-\033[0m %s\n' "$1"; SKIPS=$((SKIPS+1)); }
 
-ENDPOINT="${APIM_GW}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21"
+have_control_plane() {
+  [[ -n "$RG" && -n "$APIM_NAME" ]]
+}
 
-# --- M1.1 — API resource exists ---
-if az apim api show -g "$RG" --service-name "$APIM" --api-id openai >/dev/null 2>&1; then
-  green "Step 1.5 — API resource 'openai' present"
+ENDPOINT="${APIM_GATEWAY_URL}/openai/openai/deployments/${MODEL_DEPLOY}/chat/completions?api-version=2024-10-21"
+
+# --- M1.1 — API resource exists (control plane) ---
+if have_control_plane; then
+  if az apim api show -g "$RG" --service-name "$APIM_NAME" --api-id openai >/dev/null 2>&1; then
+    green "Step 1.5 — API resource 'openai' present"
+  else
+    red "Step 1.5 — API resource 'openai' missing"
+  fi
 else
-  red "Step 1.5 — API resource 'openai' missing"
+  yellow "Step 1.5 — API resource check skipped (set RG and APIM_NAME to enable)"
 fi
 
-# --- M1.2 — Backend exists with MI auth ---
-auth=$(az apim backend show -g "$RG" --service-name "$APIM" --backend-id aoai-sea \
-       --query "credentials.managedIdentity.resource" -o tsv 2>/dev/null)
-if [[ "$auth" == "https://cognitiveservices.azure.com" ]]; then
-  green "Step 2 — Backend 'aoai-sea' with managed identity"
+# --- M1.2 — Backend exists with MI auth (control plane) ---
+if have_control_plane; then
+  auth=$(az apim backend show -g "$RG" --service-name "$APIM_NAME" --backend-id aoai-sea \
+         --query "credentials.managedIdentity.resource" -o tsv 2>/dev/null)
+  if [[ "$auth" == "https://cognitiveservices.azure.com" ]]; then
+    green "Step 2 — Backend 'aoai-sea' with managed identity"
+  else
+    red "Step 2 — Backend 'aoai-sea' missing or wrong auth (got: '$auth')"
+  fi
 else
-  red "Step 2 — Backend 'aoai-sea' missing or wrong auth (got: '$auth')"
+  yellow "Step 2 — Backend MI check skipped (set RG and APIM_NAME to enable)"
 fi
 
-# --- M1.3 — llm-token-limit response headers ---
+# --- M1.3 — llm-token-limit response headers (data plane) ---
 hdr=$(curl -sS -i -X POST "$ENDPOINT" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
@@ -64,7 +89,7 @@ else
   red "Step 3 — llm-token-limit: x-tokens-consumed header missing"
 fi
 
-# --- M1.3 — 429 after burst (run only if M1 verified) ---
+# --- M1.3 — 429 after burst (data plane) ---
 codes=$(for i in $(seq 1 25); do
   curl -sS -o /dev/null -w "%{http_code}\n" -X POST "$ENDPOINT" \
     -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
@@ -82,7 +107,7 @@ fi
 echo "  (sleeping 65s to let the token window slide…)"
 sleep 65
 
-# --- M1.4 — semantic cache: 2nd identical request faster ---
+# --- M1.4 — semantic cache: 2nd identical request faster (data plane) ---
 prompt='{"messages":[{"role":"user","content":"What is the capital of France?"}]}'
 t1=$(curl -o /dev/null -sS -w "%{time_total}" -X POST "$ENDPOINT" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
@@ -92,7 +117,6 @@ t2=$(curl -o /dev/null -sS -w "%{time_total}" -X POST "$ENDPOINT" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
   -H "Content-Type: application/json" -d "$prompt")
-# Convert to ms (bash arithmetic doesn't do floats; awk fine)
 faster=$(awk -v a="$t1" -v b="$t2" 'BEGIN{ print (b < a/2) ? "yes" : "no" }')
 if [[ "$faster" == "yes" ]]; then
   green "Step 4 — semantic-cache: 2nd request ($(printf '%.0f' "$(echo "$t2 * 1000" | bc)") ms) was < half of first ($(printf '%.0f' "$(echo "$t1 * 1000" | bc)") ms)"
@@ -100,7 +124,7 @@ else
   red "Step 4 — semantic-cache: 2nd request not faster (t1=${t1}s, t2=${t2}s). Did you apply lookup AND store?"
 fi
 
-# --- M1.6 — header routing returns different model ids ---
+# --- M1.6 — header routing returns different model ids (data plane) ---
 m1=$(curl -sS -X POST "$ENDPOINT" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
@@ -123,7 +147,7 @@ fi
 
 # --- M2: optional checks ---
 if (( INCLUDE_M2 == 1 )); then
-  # JWT required (no token + no anonymous mode → 401)
+  # JWT required (no token + no anonymous mode → 401) — data plane
   code=$(curl -sS -o /dev/null -w "%{http_code}\n" -X POST "$ENDPOINT" \
     -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
     -H "Content-Type: application/json" \
@@ -134,7 +158,7 @@ if (( INCLUDE_M2 == 1 )); then
     red "M2 Step 3 — validate-jwt: expected 401 without Bearer, got $code"
   fi
 
-  # Content safety blocks jailbreak
+  # Content safety blocks jailbreak — data plane
   code=$(curl -sS -o /dev/null -w "%{http_code}\n" -X POST "$ENDPOINT" \
     -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
     -H "x-auth-mode: anonymous" \
@@ -146,10 +170,9 @@ if (( INCLUDE_M2 == 1 )); then
     red "M2 Step 4 — llm-content-safety: expected 403 on jailbreak, got $code"
   fi
 
-  # Token metric in App Insights (last 10 minutes)
-  LAW=$(terraform output -raw log_analytics_workspace_id 2>/dev/null)
-  if [[ -n "$LAW" ]]; then
-    n=$(az monitor log-analytics query --workspace "$LAW" \
+  # Token metric in App Insights (last 10 minutes) — control plane
+  if [[ -n "$LOG_ANALYTICS_WORKSPACE_ID" ]]; then
+    n=$(az monitor log-analytics query --workspace "$LOG_ANALYTICS_WORKSPACE_ID" \
       --analytics-query "customMetrics | where name == 'Total Tokens' and timestamp > ago(10m) | count" \
       --query "[0].Count" -o tsv 2>/dev/null)
     if [[ -n "$n" && "$n" != "0" ]]; then
@@ -157,13 +180,15 @@ if (( INCLUDE_M2 == 1 )); then
     else
       red "M2 Step 1 — llm-emit-token-metric: no records in App Insights (give it ~60s and retry)"
     fi
+  else
+    yellow "M2 Step 1 — token metric check skipped (set LOG_ANALYTICS_WORKSPACE_ID to enable)"
   fi
 fi
 
 echo ""
 if (( FAILS == 0 )); then
-  echo "All policy checks passed."
+  echo "All policy checks passed${SKIPS:+ ($SKIPS admin-only checks skipped)}."
 else
-  echo "$FAILS check(s) failed."
+  echo "$FAILS check(s) failed${SKIPS:+, $SKIPS admin-only check(s) skipped}."
 fi
 exit "$FAILS"

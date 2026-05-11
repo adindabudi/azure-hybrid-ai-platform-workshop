@@ -2,6 +2,10 @@
 # Bootstrap per-attendee namespaces, RBAC, ResourceQuota, ServiceAccount, and
 # SecretProviderClass after `terraform apply` of the landing zone has succeeded.
 #
+# FACILITATOR-ONLY — run once by the workshop admin after `terraform apply`.
+# Requires Terraform state, RG owner permissions, and AKS admin access.
+# Attendees do not run this; they receive their environment pre-provisioned.
+#
 # Usage:
 #   ./scripts/bootstrap-attendees.sh
 #

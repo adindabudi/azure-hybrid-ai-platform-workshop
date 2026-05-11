@@ -328,6 +328,7 @@ Production = GPU node pool.
 ## Step 5 — Verify every policy at once
 
 After Steps 1–4 (M2 on top of M1), run the verifier with the `--m2` flag.
+It reuses the same `APIM_GATEWAY_URL` / `APIM_KEY` env vars from M1.
 
 ```bash
 ./scripts/verify-policies.sh --m2

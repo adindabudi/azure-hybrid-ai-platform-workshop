@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # Reset a single attendee namespace back to pristine state.
+#
+# FACILITATOR-ONLY — requires AKS admin / cluster role on attendee namespaces.
+# Does NOT require Terraform state.
+#
 # Usage: ./scripts/reset-attendee.sh 03
 
 set -euo pipefail

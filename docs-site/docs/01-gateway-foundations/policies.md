@@ -416,8 +416,13 @@ az apim backend update \
 The repo ships a verifier at
 [`scripts/verify-policies.sh`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/scripts/verify-policies.sh).
 Run it after Steps 1–7 to confirm every applied policy is doing its job.
+The script reads `APIM_GATEWAY_URL` and `APIM_KEY` from your environment
+(both come from the handout your facilitator gave you — no Terraform
+state required).
 
 ```bash
+export APIM_GATEWAY_URL="https://aigw-xxx.azure-api.net"   # from handout
+export APIM_KEY="..."                                       # from handout
 ./scripts/verify-policies.sh
 ```
 

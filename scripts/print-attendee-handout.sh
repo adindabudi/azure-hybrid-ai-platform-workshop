@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # Print connection details for a single attendee. Sensitive — do NOT email.
+#
+# FACILITATOR-ONLY — requires Terraform state (reads `terraform output`).
+# Attendees do not run this script; they receive its printed output.
+#
 # Usage: ./scripts/print-attendee-handout.sh 03
 
 set -euo pipefail
@@ -75,6 +79,12 @@ cat <<HANDOUT
     -H "Ocp-Apim-Subscription-Key: ${APIM_KEY:-<key>}" \\
     -H "Content-Type: application/json" \\
     -d '{"messages":[{"role":"user","content":"hello, what region am I talking to?"}]}'
+
+== Verify your policies (no Terraform state needed) ==
+  export APIM_GATEWAY_URL="${APIM_GATEWAY}"
+  export APIM_KEY="${APIM_KEY:-<key>}"
+  ./scripts/verify-policies.sh         # after M1
+  ./scripts/verify-policies.sh --m2    # after M2
 
 =================================================================
 HANDOUT

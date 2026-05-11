@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Quick smoke test of the deployed landing zone — facilitator runs this the
 # morning of the workshop to confirm everything is reachable.
+#
+# FACILITATOR-ONLY — requires Terraform state and RG reader permissions.
+# Attendees use scripts/verify-policies.sh (env-var driven) instead.
 
 set -euo pipefail
 
