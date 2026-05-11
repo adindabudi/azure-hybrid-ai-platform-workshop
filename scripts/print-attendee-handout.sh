@@ -14,7 +14,8 @@ if [[ $# -ne 1 ]]; then
   exit 1
 fi
 
-NUM=$(printf "%02d" "$1")
+# 10# forces base-10 so leading zeros (08, 09) aren't parsed as invalid octal.
+NUM=$(printf "%02d" "$((10#$1))")
 NS="attendee-${NUM}"
 
 INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../infra" && pwd)"
