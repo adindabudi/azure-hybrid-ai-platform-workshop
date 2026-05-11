@@ -51,15 +51,96 @@ Prints the per-attendee connection slip — `APIM_GATEWAY`,
 KV / Search endpoints, App Insights connection string, plus the curl
 smoke-test the attendee will run in M0.
 
-**Hand the printout to the attendee in person, or share it through a
-short-TTL channel.** The subscription key is sensitive — treat it like a
-password. Do not email; do not paste in Slack.
-
 The handout already includes `export APIM_GATEWAY_URL=…` and
 `export APIM_KEY=…` lines that the attendee copy-pastes into their
 shell — they never have to touch Terraform.
 
-## Step 3 — Reset (during the workshop, if needed)
+## Step 3 — Distribute the handouts
+
+Pick **one** distribution channel — never mix to avoid leakage.
+
+### Option A — Per-attendee email via Microsoft Graph (recommended)
+
+Best for in-tenant workshops where you already have everyone's email
+plus a Temporary Access Pass (TAP) from your Entra admin. The script
+uses your own `az login` session to call `/me/sendMail`, so no service
+principal or app registration is needed.
+
+Build a CSV (`attendees.csv`) **outside the repo** — it contains email
+addresses and TAPs:
+
+```csv
+number,email,name,tap
+01,alice@contoso.com,Alice Tan,12345-ABCDE-FGHIJ
+02,bob@contoso.com,Bob Wijaya,67890-KLMNO-PQRST
+```
+
+Dry-run first to inspect what will be sent:
+
+```bash
+./scripts/send-attendee-emails.sh ~/attendees.csv
+```
+
+Then actually send:
+
+```bash
+./scripts/send-attendee-emails.sh ~/attendees.csv --send
+```
+
+Each email contains: TAP block (skipped if the `tap` column is empty),
+full connection slip including APIM key, and a link to the docs site.
+The subject is `[AI Gateway Workshop] Your handout — attendee-NN`. A
+copy lands in your Sent Items.
+
+If your tenant blocks `Mail.Send` delegated, ask your admin to grant
+it for your account, or fall back to Option B/C.
+
+### Option B — Printed paper, hand to each attendee in person
+
+The most secure, zero-digital-trail option. Concatenate all handouts
+into a single PDF for printing:
+
+```bash
+OUT="$HOME/handouts-$(date +%Y%m%d).txt"
+: > "$OUT" && chmod 600 "$OUT"
+for n in $(seq -f '%02g' 1 10); do
+  ./scripts/print-attendee-handout.sh "$n" >> "$OUT"
+  printf '\n\n\f\n' >> "$OUT"  # form-feed = page break
+done
+# Print, then immediately:
+shred -u "$OUT"
+```
+
+Print 1-per-page, hand to each attendee at check-in, ask them to
+shred after the workshop.
+
+### Option C — Split-channel (encrypted ZIP + out-of-band password)
+
+When you don't have TAPs and email is your only channel:
+
+1. ZIP each attendee's handout with a per-person password:
+   ```bash
+   for n in $(seq -f '%02g' 1 10); do
+     ./scripts/print-attendee-handout.sh "$n" > "/tmp/${n}.txt"
+     PASS=$(openssl rand -base64 9)
+     7z a -p"$PASS" -mhe=on "/tmp/handout-${n}.7z" "/tmp/${n}.txt"
+     echo "attendee-${n}: $PASS"
+     rm "/tmp/${n}.txt"
+   done
+   ```
+2. Email each ZIP to the corresponding attendee.
+3. Send the password via a **different** channel (SMS, WhatsApp,
+   in-person).
+
+### What NOT to do
+
+- ❌ Single email with all 10 handouts (one leak = ten compromises).
+- ❌ Posting in Teams/Slack channel even if "private" (chat retention).
+- ❌ Pinning a Confluence/Notion page with keys (search indexes).
+- ❌ Letting attendees screenshot the projector (don't display on
+  shared screen).
+
+## Step 4 — Reset (during the workshop, if needed)
 
 If an attendee gets their namespace into a bad state, blow away the
 workloads (keeps SA / quota / SPC):
