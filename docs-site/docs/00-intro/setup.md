@@ -23,32 +23,108 @@ back here and pretend you're attendee `01`.
 
 ## Prerequisites
 
-Before you start, make sure each command below prints a version number.
+You can run this lab on **any of three shells**. Pick one and stick with
+it for the day — mixing breaks `kubectl` (see the warning below).
+
+| Track | Shell | When to pick it |
+| --- | --- | --- |
+| **A — Linux / macOS** | `bash` / `zsh` | You're on Linux or a Mac. |
+| **B — WSL Ubuntu on Windows** | `bash` inside WSL | You have WSL installed. Cleanest Windows path. |
+| **C — Windows native** | PowerShell 7 (or Windows PowerShell 5.1) | No WSL, no admin rights to install one. |
+
+Every command in M0–M6 is shown in **bash first**. Where Windows-native
+syntax differs (env vars, `curl`), a PowerShell block is shown right
+below.
+
+### Verify your tools
+
+**Track A / B (bash):**
 
 ```bash
-az version --query '"azure-cli"' -o tsv         # ≥ 2.61
+az version --query '"azure-cli"' -o tsv          # ≥ 2.61
 kubectl version --client --output=yaml | head -2 # ≥ 1.30
-python --version                                 # ≥ 3.10
-node --version                                   # ≥ 20 (for the docs site only)
+python --version                                  # ≥ 3.10
+node --version                                    # ≥ 20 (docs site only)
 ```
 
-If anything is missing, install:
-[Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli),
-[kubectl](https://kubernetes.io/docs/tasks/tools/),
-[Python 3.13](https://www.python.org/downloads/),
-[Node 20](https://nodejs.org/).
+**Track C (PowerShell):**
 
-:::warning Windows + WSL users — install `az` *inside* WSL
-If you're running this lab in WSL, install Azure CLI **in your WSL
-distro** (`curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash`),
-not the Windows MSI. WSL inherits the Windows `PATH`, so `az.exe` will
-silently shadow whatever you intend to use and write `kubeconfig` to
-`C:\Users\<you>\.kube\config` — but your WSL `kubectl` reads
-`/home/<you>/.kube/config`. The result is `kubectl config set-context`
-returning *"no current context is set"* even though `az aks
-get-credentials` succeeded. Mixing OS sides is the #1 setup failure for
-this workshop. See **Step 4a** below for the recovery path if you've
-already hit it.
+```powershell
+az version --query '"azure-cli"' -o tsv          # ≥ 2.61
+kubectl version --client --output=yaml | Select-Object -First 2
+python --version
+node --version
+```
+
+### Install what's missing — **none of these require admin rights**
+
+**Azure CLI** ([install-azure-cli on MS Learn](https://learn.microsoft.com/cli/azure/install-azure-cli)):
+
+| Track | Command | Admin? |
+| --- | --- | --- |
+| A (macOS) | `brew install azure-cli` | no |
+| A (Ubuntu/Debian) / B (WSL) | `curl -sL https://aka.ms/InstallAzureCLIDeb \| sudo bash` | `sudo` only (no Windows admin) |
+| C (Windows native) | `winget install -e --id Microsoft.AzureCLI --scope user` | **no** (user scope) |
+
+**kubectl** via `az aks install-cli` — drops the binary into your
+**user profile**, no admin needed
+([az aks install-cli MS Learn](https://learn.microsoft.com/cli/azure/aks#az-aks-install-cli)):
+
+**Track A / B (bash):**
+
+```bash
+az aks install-cli
+# Installs to ~/.azure-kubectl/kubectl
+# Add to PATH if needed:
+echo 'export PATH="$HOME/.azure-kubectl:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+kubectl version --client | head -1
+```
+
+**Track C (PowerShell):**
+
+```powershell
+az aks install-cli
+# Installs to %USERPROFILE%\.azure-kubectl\kubectl.exe — no admin needed.
+# Add to user PATH (persists across sessions):
+[Environment]::SetEnvironmentVariable(
+    "PATH",
+    [Environment]::GetEnvironmentVariable("PATH","User") + ";$env:USERPROFILE\.azure-kubectl",
+    "User"
+)
+# Reopen PowerShell, then:
+kubectl version --client
+```
+
+If you can't install Azure CLI at all (locked-down laptop), fall back
+to the browser-based [Azure Cloud Shell](https://shell.azure.com) — it
+ships with `az`, `kubectl`, and `curl` already wired up.
+
+:::warning Don't mix Windows-native `az` with WSL `kubectl`
+WSL inherits the Windows `PATH`, so if you installed Azure CLI on
+Windows (Track C) and `kubectl` inside WSL (Track B), `az.exe` writes
+`kubeconfig` to `C:\Users\<you>\.kube\config` and your WSL `kubectl`
+reads `/home/<you>/.kube/config` — two different files. The result is
+`kubectl config set-context` returning *"no current context is set"*
+even though `az aks get-credentials` succeeded. **Pick one track and
+install both `az` and `kubectl` inside it.** Step 4a below recovers if
+you've already hit this.
+:::
+
+:::info Syntax conventions for the rest of the workshop
+M0 (this page) shows every command in both **bash** and **PowerShell**.
+M1–M6 default to bash. If you're on **Track C (Windows native)**,
+translate three things as you go:
+
+| bash | PowerShell |
+| --- | --- |
+| `export FOO=bar` | `$env:FOO = "bar"` |
+| `"${FOO}"` inside a string | `"$env:FOO"` |
+| `curl ...` (in pipelines) | `curl.exe ...` (PowerShell's `curl` is `Invoke-WebRequest`) |
+| `\` line-continuation | `` ` `` (backtick) |
+
+Everything else (`az`, `kubectl`, `jq` if installed, `python`,
+`docker`) has the same syntax on both shells.
 :::
 
 ## Step 1 — Clone the workshop repo
@@ -94,12 +170,22 @@ KEY_VAULT_URI    https://...
 APP_INSIGHTS_CONN_STRING InstrumentationKey=...
 ```
 
-Export the two values every lab needs:
+Export the two values every lab needs.
+
+**Track A / B (bash):**
 
 ```bash
 export APIM_GATEWAY_URL="https://apim-aigw-xxx.azure-api.net"
 export APIM_KEY="..."
 export NAMESPACE="attendee-03"
+```
+
+**Track C (PowerShell):**
+
+```powershell
+$env:APIM_GATEWAY_URL = "https://apim-aigw-xxx.azure-api.net"
+$env:APIM_KEY        = "..."
+$env:NAMESPACE       = "attendee-03"
 ```
 
 :::caution Sensitive
@@ -113,23 +199,36 @@ Your handout lists `RESOURCE_GROUP` and `AKS_NAME` — substitute them
 below. The resource group is the same for every attendee; the AKS name
 has a random suffix (e.g. `aks-aigw-7f2a`).
 
+**Track A / B (bash):**
+
 ```bash
 RG="rg-aigw-workshop"       # from your handout
 AKS="aks-aigw-xxx"          # from your handout — replace `xxx` with your real suffix
+```
+
+**Track C (PowerShell):**
+
+```powershell
+$RG  = "rg-aigw-workshop"
+$AKS = "aks-aigw-xxx"
 ```
 
 :::tip Handout doesn't show the full AKS name?
 List the clusters your account can see in the workshop RG:
 
 ```bash
-az aks list -g "$RG" --query "[].name" -o tsv
+az aks list -g "$RG" --query "[].name" -o tsv      # bash
+az aks list -g $RG --query "[].name" -o tsv        # PowerShell
 ```
 :::
 
-### 4a — Make sure `az` and `kubectl` share the same kubeconfig
+### 4a — (WSL only) make sure `az` and `kubectl` share the same kubeconfig
 
-This is the **most common stumbling block on Windows + WSL**, so check
-it *before* you call `az aks get-credentials`. Run:
+**Skip this entire section if you're on Track A (Linux/macOS) or
+Track C (Windows native).** It only applies to Track B (WSL) attendees
+who accidentally installed Azure CLI on Windows instead of inside WSL.
+
+Run inside your WSL shell:
 
 ```bash
 which az kubectl
@@ -137,7 +236,7 @@ which az kubectl
 
 | Output | Meaning | Action |
 | --- | --- | --- |
-| Both end in `/usr/bin/...` (or both `.exe`) | Same OS — you're fine | Skip to **4b** |
+| Both end in `/usr/bin/...` | Same OS — you're fine | Skip to **4b** |
 | `az` ends in `.exe` but `kubectl` does **not** (or vice versa) | You're in WSL but `az` is the Windows installer. They write/read different `kubeconfig` files. | Pick **one** option below, then go to 4b |
 
 **Option A (recommended) — install `az` inside WSL** so both binaries
@@ -162,25 +261,44 @@ echo "export KUBECONFIG=\"$KUBECONFIG\"" >> ~/.bashrc   # persist for new shells
 
 ### 4b — Pull the kubeconfig
 
+**Track A / B (bash):**
+
 ```bash
 az aks get-credentials --resource-group "$RG" --name "$AKS" --overwrite-existing
+```
+
+**Track C (PowerShell):**
+
+```powershell
+az aks get-credentials --resource-group $RG --name $AKS --overwrite-existing
 ```
 
 Expected last line — **the path here must match where `kubectl` reads from**:
 
 ```text
-Merged "aks-aigw-xxx" as current context in /home/<you>/.kube/config
+Merged "aks-aigw-xxx" as current context in /home/<you>/.kube/config   # bash on Linux/WSL
+Merged "aks-aigw-xxx" as current context in C:\Users\<you>\.kube\config # PowerShell on Windows
 ```
 
-If you see `C:\Users\...\.kube\config` instead and `kubectl` is your
-WSL Linux binary, you skipped 4a — fix it now or `kubectl` will keep
-saying *"no current context is set"*.
+If you see `C:\Users\...\.kube\config` while running **WSL bash**, you
+skipped 4a — fix it now or `kubectl` will keep saying *"no current
+context is set"*.
 
 ### 4c — Pin your namespace and verify
+
+**Track A / B (bash):**
 
 ```bash
 kubectl config current-context           # must print aks-aigw-xxx
 kubectl config set-context --current --namespace="$NAMESPACE"
+kubectl get serviceaccount,secretproviderclass,secret
+```
+
+**Track C (PowerShell):**
+
+```powershell
+kubectl config current-context                          # must print aks-aigw-xxx
+kubectl config set-context --current --namespace=$env:NAMESPACE
 kubectl get serviceaccount,secretproviderclass,secret
 ```
 
@@ -192,15 +310,23 @@ bootstrap yet.
 Both errors mean `kubectl` can't find a populated kubeconfig. Diagnose:
 
 ```bash
+# bash
 echo "KUBECONFIG=${KUBECONFIG:-<unset, defaults to ~/.kube/config>}"
 kubectl config view --minify        # should show a "current-context" line
 ls -la ~/.kube/config 2>/dev/null
 ls -la /mnt/c/Users/*/.kube/config 2>/dev/null
 ```
 
-If a Windows-path config file exists but your `KUBECONFIG` is unset,
-you're hitting the WSL split-kubeconfig issue — go back to **4a Option B**.
-Background:
+```powershell
+# PowerShell
+"KUBECONFIG=$($env:KUBECONFIG ?? '<unset, defaults to ~/.kube/config>')"
+kubectl config view --minify
+Get-Item $env:USERPROFILE\.kube\config -ErrorAction SilentlyContinue
+```
+
+If a Windows-path config file exists but your `KUBECONFIG` is unset
+inside WSL, you're hitting the WSL split-kubeconfig issue — go back to
+**4a Option B**. Background:
 [AKS — Config file isn't available when connecting](https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/connectivity/config-file-is-not-available-when-connecting).
 :::
 
@@ -208,6 +334,8 @@ Background:
 
 This is the moment of truth: a request from your laptop → APIM in
 Indonesia Central → Azure OpenAI in Southeast Asia → back to your laptop.
+
+**Track A / B (bash):**
 
 ```bash
 curl -sS \
@@ -217,6 +345,21 @@ curl -sS \
   -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"Reply in one short sentence."}]}' \
   | jq -r '.choices[0].message.content'
+```
+
+**Track C (PowerShell)** — use `curl.exe` explicitly (PowerShell's
+`curl` is an alias for `Invoke-WebRequest` with a different syntax;
+real `curl.exe` ships with Windows 10 1803+):
+
+```powershell
+$response = curl.exe -sS `
+  "$env:APIM_GATEWAY_URL/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" `
+  -H "Ocp-Apim-Subscription-Key: $env:APIM_KEY" `
+  -H "x-auth-mode: anonymous" `
+  -H "Content-Type: application/json" `
+  -d '{"messages":[{"role":"user","content":"Reply in one short sentence."}]}'
+
+($response | ConvertFrom-Json).choices[0].message.content
 ```
 
 **Expected output** — any single short sentence from the model. Example:
@@ -256,6 +399,8 @@ during the workshop — it'll come up again in M2.
 Every subsequent module uses the same pinned set of packages. Smoke-tested
 on Python 3.13 on May 10 2026.
 
+**Track A / B (bash):**
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -268,6 +413,26 @@ pip install \
   'wrapt<2' \
   --pre microsoft-agents-a365-observability-extensions-langchain \
   --pre microsoft-agents-a365-observability-extensions-agent-framework \
+  'azure-monitor-opentelemetry'
+```
+
+**Track C (PowerShell):**
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+# If you get "running scripts is disabled on this system", run once
+# in the same session — does not require admin, only affects this PS process:
+#   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+pip install `
+  'agent-framework==1.3.*' `
+  'langchain==1.2.15' `
+  'langchain-core==1.2.31' `
+  'langchain-openai==1.1.14' `
+  'wrapt<2' `
+  --pre microsoft-agents-a365-observability-extensions-langchain `
+  --pre microsoft-agents-a365-observability-extensions-agent-framework `
   'azure-monitor-opentelemetry'
 ```
 
