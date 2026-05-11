@@ -391,7 +391,11 @@ KQL queries run in the **Azure portal**, *not* in your terminal
    — your facilitator can give you the exact name, or click the
    `APP_INSIGHTS_CONN_STRING` URL from your handout).
 3. In the left menu, under **Monitoring**, click **Logs**.
-4. Paste the KQL block into the **New Query** tab and click **Run**
+4. **Top-right corner: switch the toggle from "Simple mode" to "KQL
+   mode".** Simple mode only accepts the visual query builder; the
+   `kusto` blocks in these docs will silently return *"No results
+   found"* until you flip this.
+5. Paste the KQL block into the **New Query** tab and click **Run**
    (or press **Shift+Enter**).
 
 The same flow applies to **every** ```` ```kusto ```` block in the rest of
