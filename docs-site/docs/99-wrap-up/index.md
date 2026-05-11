@@ -26,8 +26,8 @@ journey is hardening.
 
 ## Production hardening checklist
 
-Use this in your customer's first design review. Each item is a real
-decision they need to make, with a workshop reference.
+Use this in your first production design review. Each item is a real
+decision you need to make, with a workshop reference.
 
 ### Gateway tier
 
@@ -128,7 +128,7 @@ This removes all 90+ resources except the resource group itself
   presenter-only path.
 - Substitute `location = "westeurope"` (or any region with full
   service coverage) and watch which modules simplify.
-- Adapt the policy XML to your customer's specific guardrails.
+- Adapt the policy XML to your own organization's specific guardrails.
 
 ## Reference
 

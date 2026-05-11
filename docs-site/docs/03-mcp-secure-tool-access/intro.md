@@ -162,8 +162,8 @@ workshop, or you can read the
 [Facilitator Guide](../90-facilitator-guide/apply-policies.md) for the exact
 CLI.
 
-The point: when your customer says *"can we expose our existing OpenAPI
-surface as MCP without writing a server?"* — they get it for free.
+The point: when someone asks *"can we expose our existing OpenAPI
+surface as MCP without writing a server?"* — the answer is yes, for free.
 
 ## Step 5 — Threat model walkthrough
 

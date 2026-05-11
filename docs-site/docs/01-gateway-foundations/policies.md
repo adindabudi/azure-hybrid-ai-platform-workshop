@@ -10,7 +10,7 @@ sidebar_position: 2
 In this 55-minute hands-on module you will:
 
 - Read the **policy XML** your facilitator already applied to the
-  gateway — line by line, so you can take the same XML to your customer.
+  gateway — line by line, so you can reuse the same XML in production.
 - Verify the **`llm-token-limit`** policy by triggering a 429.
 - Verify the **semantic cache** by replaying an identical prompt.
 - Verify the **priority load balancer** by reading the `.model` field.

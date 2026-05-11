@@ -43,7 +43,7 @@ is in
 | Container Registry | Indonesia Central | Basic |
 | **Azure OpenAI** | **Southeast Asia** | S0 — `gpt-5-mini`, `text-embedding-3-large` |
 
-### Production-target architecture (what your customer will deploy)
+### Production-target architecture
 
 The architecture you actually want to run in production. Differences from
 the workshop architecture are bolded.

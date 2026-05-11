@@ -217,9 +217,10 @@ python apps/eval-suite/redteam.py
 Open `redteam-scorecard.html` in a browser — it shows pass/fail per
 risk category and per attack strategy with example prompts.
 
-## Step 5 — Honest gap statement
+## Step 5 — Known limitations
 
-You will need to present these limitations to your customer.
+Be aware of these gaps before you rely on the Foundry red-teaming
+agent as your only safety net:
 
 - **Agent-specific risk categories** — *Prohibited Actions*,
   *Sensitive Data Leakage*, *Task Adherence* — are **cloud-only**, and
@@ -228,14 +229,14 @@ You will need to present these limitations to your customer.
 - Both modes are **single-turn**, **English-only**, and use **synthetic
   test data**.
 
-If your customer needs multi-turn red teaming in a non-English language,
-or wants the agent-specific categories without sending traffic outside
-their region, the workaround is:
+If you need multi-turn red teaming in a non-English language, or you
+need the agent-specific categories without sending traffic outside your
+region, layer these on top:
 
 1. Design-time threat modeling (handout in M3).
 2. APIM content-safety guardrails (M2).
 3. Manual review of multi-turn agent traces in Application Insights.
-4. Custom adversarial test set in the customer's language, fed into
+4. A custom adversarial test set in the target language, fed into
    DeepEval or the hand-rolled script.
 
 ## What you just built
