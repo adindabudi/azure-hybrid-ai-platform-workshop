@@ -46,14 +46,16 @@ cat <<HANDOUT
    AI GATEWAY WORKSHOP — Connection details for ${NS}
 =================================================================
 
-== Step 1: Get AKS credentials ==
+== Step 1: Get AKS credentials (creates your kubectl context) ==
   az login
   az account set --subscription <subscription-id>
   az aks get-credentials -g ${RG} -n ${AKS} --overwrite-existing
+  kubectl config current-context     # must print ${AKS}
 
-== Step 2: Switch to your namespace ==
+== Step 2: Pin your namespace as the default ==
   kubectl config set-context --current --namespace=${NS}
   kubectl get all          # should be empty initially
+  # If you see "error: no current context is set" — you skipped Step 1.
 
 == APIM ==
   Gateway URL              : ${APIM_GATEWAY}

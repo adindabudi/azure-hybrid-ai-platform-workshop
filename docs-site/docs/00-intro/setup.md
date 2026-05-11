@@ -96,15 +96,48 @@ paste it into Slack, email, or screenshots; do not commit it to git.
 
 ## Step 4 — Connect to the shared AKS cluster
 
-```bash
-RG=rg-aigw-workshop          # from your handout
-AKS=aks-aigw-xxx             # from your handout
+Your handout lists `RESOURCE_GROUP` and `AKS_NAME` — substitute them
+below. The resource group is the same for every attendee; the AKS name
+has a random suffix (e.g. `aks-aigw-7f2a`).
 
-az aks get-credentials -g "$RG" -n "$AKS" --overwrite-existing
-kubectl config set-context --current --namespace="$NAMESPACE"
+### 4a — Pull the kubeconfig (this is what creates your kubectl context)
+
+```bash
+RG="rg-aigw-workshop"       # from your handout
+AKS="aks-aigw-xxx"          # from your handout — replace `xxx` with your real suffix
+
+az aks get-credentials --resource-group "$RG" --name "$AKS" --overwrite-existing
 ```
 
-Verify your namespace is already populated by the facilitator's bootstrap:
+Expected last line:
+
+```text
+Merged "aks-aigw-xxx" as current context in /home/<you>/.kube/config
+```
+
+:::tip Handout doesn't show the full AKS name?
+List the clusters your account can see in the workshop RG:
+
+```bash
+az aks list -g "$RG" --query "[].name" -o tsv
+```
+:::
+
+### 4b — Pin your namespace as the default
+
+```bash
+kubectl config set-context --current --namespace="$NAMESPACE"
+kubectl config current-context     # should print aks-aigw-xxx
+```
+
+:::caution Got `error: no current context is set`?
+You skipped 4a. `kubectl config set-context --current` modifies the
+*current* context — if `~/.kube/config` has no clusters yet, there's
+nothing to modify. Re-run `az aks get-credentials` above, then re-run
+the `set-context` command.
+:::
+
+### 4c — Verify your namespace bootstrap
 
 ```bash
 kubectl get serviceaccount,secretproviderclass,secret
