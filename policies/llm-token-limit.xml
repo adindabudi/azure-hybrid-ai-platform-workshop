@@ -1,0 +1,11 @@
+<!--
+  llm-token-limit-policy.xml
+  Per-subscription token limit. Enforced at APIM ingress so backends are protected.
+  Workshop M1.4. Source: https://learn.microsoft.com/azure/api-management/llm-token-limit-policy
+-->
+<llm-token-limit
+    counter-key="@(context.Subscription.Id)"
+    tokens-per-minute="500"
+    estimate-prompt-tokens="false"
+    tokens-consumed-header-name="x-tokens-consumed"
+    remaining-tokens-header-name="x-tokens-remaining" />

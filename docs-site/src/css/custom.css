@@ -1,0 +1,26 @@
+/**
+ * Workshop site styling — neutral, readable for code-heavy material.
+ */
+
+:root {
+  --ifm-color-primary: #0078d4;
+  --ifm-color-primary-dark: #006cbe;
+  --ifm-color-primary-darker: #0066b4;
+  --ifm-color-primary-darkest: #005494;
+  --ifm-color-primary-light: #198ae0;
+  --ifm-color-primary-lighter: #2790e2;
+  --ifm-color-primary-lightest: #4ba2e7;
+  --ifm-code-font-size: 90%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #4ba2e7;
+  --ifm-color-primary-dark: #2790e2;
+  --ifm-color-primary-darker: #198ae0;
+  --ifm-color-primary-darkest: #006cbe;
+  --ifm-color-primary-light: #6fb4eb;
+  --ifm-color-primary-lighter: #82bdee;
+  --ifm-color-primary-lightest: #b8d8f5;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}

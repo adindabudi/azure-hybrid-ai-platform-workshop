@@ -1,0 +1,13 @@
+<!--
+  load-balancer-priority.xml
+  Smart load-balancer pattern from Azure-Samples/openai-apim-lb.
+  Workshop M1.5: AOAI = priority 1, SLM = priority 2 fallback.
+  Source: https://github.com/Azure-Samples/openai-apim-lb
+
+  Use this with an APIM `backend-pool` resource defined out-of-band:
+    backend-id: aoai-pool
+      backends:
+        - aoai-sea            (priority 1, weight 100)
+        - slm-phi4            (priority 2, weight 100)
+-->
+<set-backend-service backend-id="aoai-pool" />

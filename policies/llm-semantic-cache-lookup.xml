@@ -1,0 +1,12 @@
+<!--
+  llm-semantic-cache-lookup-policy.xml
+  Workshop M1.6. embeddings-backend-auth MUST be "system-assigned"
+  (no other value allowed by the schema).
+  Source: https://learn.microsoft.com/azure/api-management/llm-semantic-cache-lookup-policy
+-->
+<llm-semantic-cache-lookup
+    score-threshold="0.05"
+    embeddings-backend-id="embeddings-backend"
+    embeddings-backend-auth="system-assigned">
+    <vary-by>@(context.Subscription.Id)</vary-by>
+</llm-semantic-cache-lookup>

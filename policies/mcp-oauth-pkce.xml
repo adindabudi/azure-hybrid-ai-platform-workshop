@@ -1,0 +1,22 @@
+<!--
+  mcp-oauth-pkce.xml
+  Workshop M3.4. OAuth 2.0 / PKCE policy fragment for MCP endpoints.
+  Adapted from Azure-Samples/remote-mcp-apim-functions-python.
+-->
+<policies>
+    <inbound>
+        <base />
+        <validate-jwt header-name="Authorization" failed-validation-httpcode="401" require-scheme="Bearer">
+            <openid-config url="https://login.microsoftonline.com/{{aad-tenant-id}}/v2.0/.well-known/openid-configuration" />
+            <required-claims>
+                <claim name="aud" match="any">
+                    <value>{{mcp-app-id}}</value>
+                </claim>
+            </required-claims>
+        </validate-jwt>
+        <rate-limit-by-key calls="120" renewal-period="60" counter-key="@(context.Subscription.Id)" />
+    </inbound>
+    <backend><base /></backend>
+    <outbound><base /></outbound>
+    <on-error><base /></on-error>
+</policies>

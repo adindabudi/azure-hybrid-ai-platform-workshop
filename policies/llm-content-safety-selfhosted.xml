@@ -1,0 +1,123 @@
+<!--
+  llm-content-safety-selfhosted.xml
+  Alternative to the cloud `llm-content-safety` policy when Content Safety
+  must reside in your primary region.
+
+  Reason this is NOT a drop-in replacement for `<llm-content-safety>`:
+  The built-in policy requires:
+    1. Backend URL: https://<name>.cognitiveservices.azure.com  (cloud-only)
+    2. Auth: Managed Identity, audience https://cognitiveservices.azure.com
+  Self-hosted Content Safety container exposes:
+    - http(s)://<host>:5000/contentsafety/text:shieldPrompt?api-version=2024-09-01
+    - Subscription key auth via Ocp-Apim-Subscription-Key header
+  Source: https://learn.microsoft.com/azure/api-management/llm-content-safety-policy
+          https://learn.microsoft.com/azure/ai-services/content-safety/quickstart-jailbreak
+          https://learn.microsoft.com/azure/ai-services/content-safety/how-to/containers/container-overview
+
+  This fragment shows the manual `<send-request>` pattern that works against
+  ANY Content Safety endpoint — cloud OR container — and is the only path
+  that keeps content scanning fully inside your primary region today.
+
+  Named values required (set them once at the APIM service scope):
+    - {{content-safety-host}}        e.g. http://content-safety.content-safety.svc.cluster.local:5000
+                                          (workshop AKS internal DNS)
+                                          OR https://<your-in-region-content-safety-host>
+    - {{content-safety-key}}          (subscription key from CS container billing config)
+-->
+<choose>
+    <when condition="@(context.Request.Body != null)">
+        <!-- 1. Extract the user prompt from the OpenAI chat request body -->
+        <set-variable name="userPrompt" value="@{
+            var body = context.Request.Body.As<JObject>(preserveContent: true);
+            var messages = (JArray)body["messages"];
+            if (messages == null || messages.Count == 0) return string.Empty;
+            // Concatenate all user messages (cap at 9_500 chars for the CS limit)
+            var sb = new System.Text.StringBuilder();
+            foreach (var m in messages) {
+                if ((string)m["role"] == "user") {
+                    if (sb.Length > 0) sb.Append('\n');
+                    sb.Append((string)m["content"]);
+                }
+            }
+            var s = sb.ToString();
+            return s.Length > 9500 ? s.Substring(0, 9500) : s;
+        }" />
+
+        <!-- 2. Call the self-hosted Prompt Shields endpoint -->
+        <send-request mode="new" response-variable-name="csResponse" timeout="10" ignore-error="false">
+            <set-url>@("{{content-safety-host}}/contentsafety/text:shieldPrompt?api-version=2024-09-01")</set-url>
+            <set-method>POST</set-method>
+            <set-header name="Ocp-Apim-Subscription-Key" exists-action="override">
+                <value>{{content-safety-key}}</value>
+            </set-header>
+            <set-header name="Content-Type" exists-action="override">
+                <value>application/json</value>
+            </set-header>
+            <set-body>@{
+                var prompt = (string)context.Variables["userPrompt"];
+                return new JObject(new JProperty("userPrompt", prompt)).ToString();
+            }</set-body>
+        </send-request>
+
+        <!-- 3. If an attack is detected, short-circuit with 403 -->
+        <choose>
+            <when condition="@{
+                var resp = (IResponse)context.Variables["csResponse"];
+                if (resp.StatusCode != 200) return false;
+                var body = resp.Body.As<JObject>(preserveContent: true);
+                var det = body.SelectToken("userPromptAnalysis.attackDetected");
+                return det != null && (bool)det;
+            }">
+                <return-response>
+                    <set-status code="403" reason="ContentBlocked" />
+                    <set-header name="Content-Type" exists-action="override">
+                        <value>application/json</value>
+                    </set-header>
+                    <set-body>@("{\"error\":{\"code\":\"PromptShieldsBlocked\",\"message\":\"Prompt blocked by self-hosted Content Safety.\"}}")</set-body>
+                </return-response>
+            </when>
+        </choose>
+
+        <!-- 4. Optional: do the same for /text:analyze (Hate/Violence/Sexual/SelfHarm severities) -->
+        <send-request mode="new" response-variable-name="csAnalyze" timeout="10" ignore-error="true">
+            <set-url>@("{{content-safety-host}}/contentsafety/text:analyze?api-version=2024-09-01")</set-url>
+            <set-method>POST</set-method>
+            <set-header name="Ocp-Apim-Subscription-Key" exists-action="override">
+                <value>{{content-safety-key}}</value>
+            </set-header>
+            <set-header name="Content-Type" exists-action="override">
+                <value>application/json</value>
+            </set-header>
+            <set-body>@{
+                var prompt = (string)context.Variables["userPrompt"];
+                return new JObject(
+                    new JProperty("text", prompt),
+                    new JProperty("categories", new JArray("Hate", "Violence", "Sexual", "SelfHarm")),
+                    new JProperty("outputType", "EightSeverityLevels")
+                ).ToString();
+            }</set-body>
+        </send-request>
+
+        <choose>
+            <when condition="@{
+                var r = (IResponse)context.Variables["csAnalyze"];
+                if (r == null || r.StatusCode != 200) return false;
+                var b = r.Body.As<JObject>(preserveContent: true);
+                var cats = b["categoriesAnalysis"] as JArray;
+                if (cats == null) return false;
+                foreach (var c in cats) {
+                    if ((int)c["severity"] >= 4) return true;
+                }
+                return false;
+            }">
+                <return-response>
+                    <set-status code="403" reason="ContentBlocked" />
+                    <set-header name="Content-Type" exists-action="override">
+                        <value>application/json</value>
+                    </set-header>
+                    <set-body>@("{\"error\":{\"code\":\"HarmfulContentBlocked\",\"message\":\"Harmful content detected by self-hosted Content Safety.\"}}")</set-body>
+                </return-response>
+            </when>
+        </choose>
+    </when>
+</choose>

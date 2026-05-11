@@ -1,0 +1,13 @@
+<!--
+  llm-emit-token-metric-policy.xml
+  Emit prompt + completion tokens to Application Insights with up to 5 dimensions.
+  Workshop M2.1. Documented max = 5. Validated by apps/apim-policies/validate.py.
+  Source: https://learn.microsoft.com/azure/api-management/llm-emit-token-metric-policy
+-->
+<llm-emit-token-metric namespace="hybrid-ai-workshop">
+    <dimension name="Subscription ID" value="@(context.Subscription.Id)" />
+    <dimension name="API ID"          value="@(context.Api.Id)" />
+    <dimension name="Operation ID"    value="@(context.Operation.Id)" />
+    <dimension name="Model"           value="@(context.Request.Headers.GetValueOrDefault(" x-model-tier",string.Empty))" />
+    <dimension name="Client IP"       value="@(context.Request.IpAddress)" />
+</llm-emit-token-metric>

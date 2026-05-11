@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: content-safety-billing
+  namespace: content-safety
+type: Opaque
+stringData:
+  # ENDPOINT URI of a Content Safety S0 resource (any region; pick whichever
+  # Azure region is closest to your AKS).
+  # Even when running the container in-region, the lightweight 10–15 min
+  # billing heartbeat reaches this endpoint — actual prompt/response data
+  # never leaves the cluster.
+  billing: "https://<your-cs-resource>.cognitiveservices.azure.com"
+  # API key of the same Content Safety resource (used only for billing).
+  key: "REPLACE_ME"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: content-safety
+  namespace: content-safety
+  labels:
+    app: content-safety
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: content-safety
+  template:
+    metadata:
+      labels:
+        app: content-safety
+    spec:
+      # amd64-only image. AKS Cilium overlay carries amd64 nodes.
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      containers:
+        - name: text-analyze
+          image: mcr.microsoft.com/azure-cognitive-services/contentsafety/text-analyze:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+          env:
+            - name: Eula
+              value: accept
+            - name: Billing
+              valueFrom:
+                secretKeyRef:
+                  name: content-safety-billing
+                  key: billing
+            - name: ApiKey
+              valueFrom:
+                secretKeyRef:
+                  name: content-safety-billing
+                  key: key
+            # CUDA_ENABLED=false = "testing only" per Microsoft docs.
+            # Set to true and add GPU resources for the production path.
+            - name: CUDA_ENABLED
+              value: "false"
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 2Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 5000
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: 5000
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: content-safety
+  namespace: content-safety
+spec:
+  type: ClusterIP
+  selector:
+    app: content-safety
+  ports:
+    - port: 5000
+      targetPort: 5000
+      name: http

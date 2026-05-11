@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Print connection details for a single attendee. Sensitive — do NOT email.
+# Usage: ./scripts/print-attendee-handout.sh 03
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "Usage: $0 <attendee-number>" >&2
+  echo "  e.g. $0 03" >&2
+  exit 1
+fi
+
+NUM=$(printf "%02d" "$1")
+NS="attendee-${NUM}"
+
+INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../infra" && pwd)"
+cd "$INFRA_DIR"
+
+RG=$(terraform output -raw resource_group_name)
+AKS=$(terraform output -raw aks_name)
+APIM=$(terraform output -raw apim_name)
+APIM_GATEWAY=$(terraform output -raw apim_gateway_url)
+APIM_PORTAL=$(terraform output -raw apim_developer_portal_url)
+KV_URI=$(terraform output -raw key_vault_uri)
+AOAI_ENDPOINT=$(terraform output -raw aoai_endpoint)
+GPT_DEPLOY=$(terraform output -raw aoai_gpt_4o_mini_deployment)
+EMB_DEPLOY=$(terraform output -raw aoai_embedding_deployment)
+COSMOS=$(terraform output -raw cosmos_endpoint)
+SEARCH=$(terraform output -raw search_endpoint)
+APPI_CONN=$(terraform output -raw application_insights_connection_string)
+
+APIM_KEY=$(az apim subscription show \
+  --resource-group "$RG" --service-name "$APIM" \
+  --sid "${NS}" --query primaryKey -o tsv 2>/dev/null \
+  || az rest --method post \
+      --url "$(terraform output -json attendee_handout | jq -r ".\"$NS\".apim_subscription_id")/listSecrets?api-version=2022-08-01" \
+      --query primaryKey -o tsv)
+
+cat <<HANDOUT
+=================================================================
+   AI GATEWAY WORKSHOP — Connection details for ${NS}
+=================================================================
+
+== Step 1: Get AKS credentials ==
+  az login
+  az account set --subscription <subscription-id>
+  az aks get-credentials -g ${RG} -n ${AKS} --overwrite-existing
+
+== Step 2: Switch to your namespace ==
+  kubectl config set-context --current --namespace=${NS}
+  kubectl get all          # should be empty initially
+
+== APIM ==
+  Gateway URL              : ${APIM_GATEWAY}
+  Developer portal         : ${APIM_PORTAL}
+  Subscription key (header): Ocp-Apim-Subscription-Key: ${APIM_KEY:-<run scripts/bootstrap-attendees.sh first>}
+
+== Backends fronted by APIM ==
+  AOAI endpoint            : ${AOAI_ENDPOINT}
+    deployments            : ${GPT_DEPLOY} (chat), ${EMB_DEPLOY} (embedding)
+  Self-hosted SLM          : (deployed by M1 lab; APIM backend "slm-phi4")
+
+== Data stores (workshop-shared) ==
+  Cosmos DB                : ${COSMOS}
+    your container         : state-${NS}  (partition key: /sessionId)
+  AI Search                : ${SEARCH}
+  Key Vault                : ${KV_URI}
+
+== Observability ==
+  App Insights conn string : (sensitive — pull at runtime)
+    \$ terraform output -raw application_insights_connection_string
+
+== APIM curl smoke-test ==
+  curl -s "${APIM_GATEWAY}/openai/openai/deployments/${GPT_DEPLOY}/chat/completions?api-version=2024-10-21" \\
+    -H "Ocp-Apim-Subscription-Key: ${APIM_KEY:-<key>}" \\
+    -H "Content-Type: application/json" \\
+    -d '{"messages":[{"role":"user","content":"hello, what region am I talking to?"}]}'
+
+=================================================================
+HANDOUT

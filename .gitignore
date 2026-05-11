@@ -1,0 +1,63 @@
+# -----------------------------------------------------------------------------
+# Terraform
+# -----------------------------------------------------------------------------
+**/.terraform/
+**/.terraform.lock.hcl
+**/terraform.tfstate
+**/terraform.tfstate.*
+**/tfplan
+**/tf.plan
+**/crash.log
+**/crash.*.log
+# Per-user overrides — never commit
+**/*.tfvars.local
+**/*.auto.tfvars
+**/.tfsec/
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# -----------------------------------------------------------------------------
+# Sensitive: env files, secrets directories, kube credentials
+# -----------------------------------------------------------------------------
+**/.env
+**/.env.*
+!**/.env.example
+**/secrets/
+**/kubeconfig
+**/*.kubeconfig
+**/*.pem
+**/*.key
+**/*.crt
+**/*.pfx
+
+# -----------------------------------------------------------------------------
+# Docusaurus / Node
+# -----------------------------------------------------------------------------
+docs-site/.docusaurus/
+docs-site/build/
+docs-site/node_modules/
+docs-site/.cache-loader/
+# package-lock.json is intentionally checked in for reproducible builds.
+# Remove this line if you prefer the loose-deps default.
+# docs-site/package-lock.json
+
+# -----------------------------------------------------------------------------
+# Python
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# -----------------------------------------------------------------------------
+# Editor / OS
+# -----------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

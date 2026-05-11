@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <rect width="200" height="200" rx="24" fill="#0078d4"/>
+  <text x="100" y="115" text-anchor="middle" font-family="-apple-system,Segoe UI,Roboto,sans-serif" font-size="56" font-weight="700" fill="white">AI</text>
+  <text x="100" y="160" text-anchor="middle" font-family="-apple-system,Segoe UI,Roboto,sans-serif" font-size="24" font-weight="500" fill="white">GATEWAY</text>
+</svg>

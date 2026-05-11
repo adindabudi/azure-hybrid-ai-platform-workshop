@@ -1,0 +1,6 @@
+<!--
+  llm-semantic-cache-store-policy.xml
+  Workshop M1.6. Pair with llm-semantic-cache-lookup at request time.
+  Source: https://learn.microsoft.com/azure/api-management/llm-semantic-cache-store-policy
+-->
+<llm-semantic-cache-store duration="60" />

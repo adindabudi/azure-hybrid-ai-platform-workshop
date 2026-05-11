@@ -1,0 +1,89 @@
+<!--
+  workshop-llm-policy.xml
+  Full inbound + outbound bundle used in M2.1-2.5 of the workshop.
+  Each LLM-* policy is also kept as a separate fragment for paste-in demos.
+
+  Backends referenced (created by the M0/M1 setup, NOT by this fragment):
+    - aoai-sea            : Azure OpenAI in Singapore, MI auth on cognitive services audience
+    - slm-phi4            : Self-hosted Phi-4-mini-instruct via internal AKS service
+    - content-safety-sea  : Content Safety in Singapore, MI auth
+    - embeddings-backend  : alias for AOAI text-embedding-3-small (MI auth REQUIRED)
+
+  Schema-validated against Microsoft Learn reference (May 2026).
+-->
+<policies>
+    <inbound>
+        <base />
+
+        <!-- Auth: Entra ID JWT for everything except local-dev path -->
+        <choose>
+            <when condition="@(context.Request.Headers.GetValueOrDefault("x-auth-mode", "entra") != "anonymous")">
+                <validate-jwt header-name="Authorization" failed-validation-httpcode="401" require-scheme="Bearer">
+                    <openid-config url="https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration" />
+                </validate-jwt>
+            </when>
+        </choose>
+
+        <!-- M2.5 — Content Safety on the inbound prompt -->
+        <llm-content-safety backend-id="content-safety-sea" shield-prompt="true">
+            <categories output-type="EightSeverityLevels">
+                <category name="Hate"     threshold="4" />
+                <category name="Violence" threshold="4" />
+                <category name="SelfHarm" threshold="4" />
+                <category name="Sexual"   threshold="4" />
+            </categories>
+        </llm-content-safety>
+
+        <!-- M1.6 — Semantic cache lookup -->
+        <llm-semantic-cache-lookup
+            score-threshold="0.05"
+            embeddings-backend-id="embeddings-backend"
+            embeddings-backend-auth="system-assigned">
+            <vary-by>@(context.Subscription.Id)</vary-by>
+        </llm-semantic-cache-lookup>
+
+        <!-- M2.5 — Per-attendee rate limiting (additional to llm-token-limit) -->
+        <rate-limit-by-key calls="60" renewal-period="60" counter-key="@(context.Subscription.Id)" />
+
+        <!-- M1.4 — Token limit per subscription -->
+        <llm-token-limit
+            counter-key="@(context.Subscription.Id)"
+            tokens-per-minute="500"
+            estimate-prompt-tokens="false"
+            tokens-consumed-header-name="x-tokens-consumed"
+            remaining-tokens-header-name="x-tokens-remaining" />
+
+        <!-- M2.1 — Emit token metric -->
+        <llm-emit-token-metric namespace="hybrid-ai-workshop">
+            <dimension name="Subscription ID" value="@(context.Subscription.Id)" />
+            <dimension name="API ID"          value="@(context.Api.Id)" />
+            <dimension name="Operation ID"    value="@(context.Operation.Id)" />
+            <dimension name="Model"           value="@(context.Request.Headers.GetValueOrDefault(" x-model-tier",string.Empty))" />
+            <dimension name="Client IP"       value="@(context.Request.IpAddress)" />
+        </llm-emit-token-metric>
+
+        <!-- M1.5 — Tier-based routing: cheap = SLM, premium = AOAI -->
+        <choose>
+            <when condition="@(context.Request.Headers.GetValueOrDefault("x-model-tier", "premium") == "cheap")">
+                <set-backend-service backend-id="slm-phi4" />
+            </when>
+            <otherwise>
+                <set-backend-service backend-id="aoai-sea" />
+            </otherwise>
+        </choose>
+    </inbound>
+
+    <backend>
+        <base />
+    </backend>
+
+    <outbound>
+        <base />
+        <!-- M1.6 — Semantic cache store -->
+        <llm-semantic-cache-store duration="60" />
+    </outbound>
+
+    <on-error>
+        <base />
+    </on-error>
+</policies>

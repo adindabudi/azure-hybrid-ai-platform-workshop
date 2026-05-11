@@ -1,0 +1,15 @@
+<!--
+  llm-content-safety-policy.xml
+  Workshop M2.5. Backend MUST be configured with Managed Identity (Cognitive
+  Services User role on the Content Safety resource). API-key auth is NOT
+  supported on this policy.
+  Source: https://learn.microsoft.com/azure/api-management/llm-content-safety-policy
+-->
+<llm-content-safety backend-id="content-safety-sea" shield-prompt="true">
+    <categories output-type="EightSeverityLevels">
+        <category name="Hate"      threshold="4" />
+        <category name="Violence"  threshold="4" />
+        <category name="SelfHarm"  threshold="4" />
+        <category name="Sexual"    threshold="4" />
+    </categories>
+</llm-content-safety>
