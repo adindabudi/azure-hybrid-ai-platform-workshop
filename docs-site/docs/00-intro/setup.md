@@ -347,9 +347,12 @@ curl -sS \
   | jq -r '.choices[0].message.content'
 ```
 
-**Track C (PowerShell)** — use `curl.exe` explicitly (PowerShell's
-`curl` is an alias for `Invoke-WebRequest` with a different syntax;
-real `curl.exe` ships with Windows 10 1803+):
+**Track C (PowerShell)** — two equivalent options:
+
+**Option C1 — `curl.exe`** (familiar syntax, identical to bash; use
+`curl.exe` explicitly because PowerShell's `curl` is an alias for
+`Invoke-WebRequest` with different flags). Real `curl.exe` ships with
+Windows 10 1803+:
 
 ```powershell
 $response = curl.exe -sS `
@@ -360,6 +363,24 @@ $response = curl.exe -sS `
   -d '{"messages":[{"role":"user","content":"Reply in one short sentence."}]}'
 
 ($response | ConvertFrom-Json).choices[0].message.content
+```
+
+**Option C2 — `Invoke-RestMethod`** (idiomatic PowerShell; auto-parses
+JSON so you don't need `ConvertFrom-Json`):
+
+```powershell
+$r = Invoke-RestMethod -Method Post `
+  -Uri "$env:APIM_GATEWAY_URL/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" `
+  -Headers @{
+    "Ocp-Apim-Subscription-Key" = $env:APIM_KEY
+    "x-auth-mode"               = "anonymous"
+  } `
+  -ContentType "application/json" `
+  -Body (@{
+    messages = @(@{ role = "user"; content = "Reply in one short sentence." })
+  } | ConvertTo-Json -Depth 10 -Compress)
+
+if ($r.choices) { $r.choices[0].message.content } else { $r | ConvertTo-Json -Depth 10 }
 ```
 
 **Expected output** — any single short sentence from the model. Example:
