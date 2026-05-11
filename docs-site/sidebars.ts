@@ -40,6 +40,17 @@ const sidebars: SidebarsConfig = {
       items: ['otel-end-to-end/intro'],
     },
     'wrap-up/index',
+    {
+      type: 'category',
+      label: 'Facilitator Guide',
+      collapsed: true,
+      items: [
+        'facilitator-guide/index',
+        'facilitator-guide/provision',
+        'facilitator-guide/attendees',
+        'facilitator-guide/apply-policies',
+      ],
+    },
   ],
 };
 

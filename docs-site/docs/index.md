@@ -121,4 +121,12 @@ You can run every lab on your laptop against the shared workshop landing
 zone, or fork [the repo](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop)
 and redeploy the whole stack in your own Azure subscription.
 
+:::info Facilitators
+If you're running the workshop for others, jump to the
+[Facilitator Guide](./90-facilitator-guide/index.md) for landing zone provisioning,
+attendee bootstrapping, and policy application. The attendee path
+(M0–M6) assumes the landing zone is already up and you've handed each
+attendee a printed connection slip.
+:::
+
 Ready? Start with [M0 — Setup](./intro/setup).

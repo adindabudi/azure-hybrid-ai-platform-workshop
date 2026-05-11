@@ -120,9 +120,8 @@ if __name__ == "__main__":
 ## Step 3 — Run it against the gateway
 
 ```bash
-export APIM_URL=$(terraform -chdir=infra output -raw apim_gateway_url)
-export APIM_KEY=$(kubectl get secret apim-credentials \
-  -o jsonpath='{.data.subscription-key}' | base64 -d)
+# APIM_URL is the same APIM_GATEWAY_URL from your handout
+export APIM_URL="$APIM_GATEWAY_URL"
 export MODEL_NAME="gpt-5-mini"
 
 python apps/agent-complaint-triage/agent.py
@@ -149,8 +148,7 @@ works against four different backends. You don't need a separate
 ### (a) APIM-fronted AOAI Singapore — what you just ran
 
 ```bash
-export APIM_URL=$(terraform -chdir=infra output -raw apim_gateway_url)
-export APIM_KEY=$(...)
+export APIM_URL="$APIM_GATEWAY_URL"           # from M0 handout
 export MODEL_NAME="gpt-5-mini"
 python apps/agent-complaint-triage/agent.py
 ```

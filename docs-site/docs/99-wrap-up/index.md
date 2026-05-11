@@ -36,7 +36,7 @@ decision they need to make, with a workshop reference.
     managed gateway in regions without v2.
   - **Premium v2** in regions that support it.
   - **Self-hosted gateway** on customer AKS for on-prem / air-gapped.
-  - Reference: [M0.2](./00-intro/architecture-reality-check)
+  - Reference: [M0.2](../00-intro/architecture-reality-check.md)
 
 ### Content safety
 
@@ -44,7 +44,7 @@ decision they need to make, with a workshop reference.
   - **Path A** — cloud Content Safety resource for managed simplicity.
   - **Path B** — Content Safety container in AKS for in-region data
     residency. Requires GPU node pool (T4/L4 minimum) for production.
-  - Reference: [M2 Step 4](./02-finops-observability-security/intro)
+  - Reference: [M2 Step 4](../02-finops-observability-security/intro.md)
 
 ### Model backend
 
@@ -53,7 +53,7 @@ decision they need to make, with a workshop reference.
   - Self-hosted SLM sized per the workshop benchmark — 1× A10 sustains
     ~137 t/s on Phi-4-mini-instruct Q4_K_M.
   - vLLM / llama.cpp / TensorRT-LLM choice depends on GPU class.
-  - Reference: [M1.5–1.6](./01-gateway-foundations/policies)
+  - Reference: [M1.5–1.6](../01-gateway-foundations/policies.md)
 
 ### Vector store
 
@@ -70,7 +70,7 @@ decision they need to make, with a workshop reference.
   Elastic) via OTLP.
 - [ ] Define the chargeback granularity — usually subscription + model
   is enough, but team-level needs custom dimensions.
-- [ ] Reference: [M6](./06-otel-end-to-end/intro)
+- [ ] Reference: [M6](../06-otel-end-to-end/intro.md)
 
 ### Identity
 
@@ -90,13 +90,13 @@ decision they need to make, with a workshop reference.
 - [ ] Failing PRs on `intent_resolution` < 0.80 or `tool_call_accuracy`
   < 0.75.
 - [ ] Local PyRIT scan on each release tag.
-- [ ] Reference: [M5](./05-evaluation-redteam/intro)
+- [ ] Reference: [M5](../05-evaluation-redteam/intro.md)
 
 ## Migration playbook for existing LangChain / LangGraph agents
 
 You don't have to rewrite. Three options, in order of effort:
 
-1. **Add the A365 LangChain instrumentor** (3 lines, [M4.1](./04-agent-framework/migrate-from-langgraph))
+1. **Add the A365 LangChain instrumentor** (3 lines, [M4.1](../04-agent-framework/migrate-from-langgraph.md))
    and front the existing chain with APIM. You get observability and
    gateway policies; the chain code is untouched.
 2. **Replace the LLM client only** — keep your LangGraph state machine,

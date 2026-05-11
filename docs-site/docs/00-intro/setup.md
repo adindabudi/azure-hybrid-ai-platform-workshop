@@ -9,10 +9,17 @@ sidebar_position: 1
 
 In this 15-minute module you will:
 
-- Connect to the shared workshop landing zone.
-- Switch into your personal Kubernetes namespace.
+- Use the printed handout your facilitator gave you to set two env vars.
+- Connect to the shared workshop AKS in your personal namespace.
 - Send your first authenticated request through the AI Gateway.
 - Install the Python stack used in every subsequent module.
+
+:::info Running this on your own subscription?
+The attendee path assumes the facilitator has already deployed the
+landing zone and handed you a slip of paper. If you're running solo,
+follow the [Facilitator Guide](../90-facilitator-guide/index.md) first, then come
+back here and pretend you're attendee `01`.
+:::
 
 ## Prerequisites
 
@@ -31,41 +38,6 @@ If anything is missing, install:
 [Python 3.13](https://www.python.org/downloads/),
 [Node 20](https://nodejs.org/).
 
-### Required Azure permissions
-
-Your Azure identity needs these roles on the workshop resource group to
-complete every lab end-to-end. The facilitator has already granted them
-to attendees of the shared workshop. If you are running this on your
-own subscription, grant them to yourself first.
-
-| Role | Scope | Why |
-| --- | --- | --- |
-| **Contributor** | Workshop resource group | Manage APIM, AKS, AOAI, Cosmos, AI Search, KV, Storage |
-| **Role Based Access Control Administrator** | Workshop resource group | Grant the APIM managed identity access to AOAI / Content Safety (M1.1 Step 2, M2 Step 4) |
-| Default user role | Microsoft Entra tenant | Register OAuth client apps for M2 (JWT) and M3 (MCP). Most tenants allow this by default ([`policies/authorizationPolicy.defaultUserRolePermissions.allowedToCreateApps`](https://learn.microsoft.com/graph/api/resources/authorizationpolicy)) |
-
-To grant the first two to yourself on your own RG:
-
-```bash
-ME=$(az ad signed-in-user show --query id -o tsv)
-RG_SCOPE="/subscriptions/<your-sub-id>/resourceGroups/<your-rg>"
-
-az role assignment create --assignee-object-id "$ME" \
-  --assignee-principal-type User \
-  --role "Contributor" --scope "$RG_SCOPE"
-
-az role assignment create --assignee-object-id "$ME" \
-  --assignee-principal-type User \
-  --role "Role Based Access Control Administrator" --scope "$RG_SCOPE"
-```
-
-:::note Why a constrained RBAC Administrator and not Owner
-`Role Based Access Control Administrator` is the modern, scope-limited
-role that grants only `Microsoft.Authorization/roleAssignments/write`
-([reference](https://learn.microsoft.com/azure/role-based-access-control/built-in-roles#role-based-access-control-administrator)).
-Use it instead of `Owner` so attendees can't escalate each other.
-:::
-
 ## Step 1 — Sign in to Azure
 
 ```bash
@@ -74,59 +46,61 @@ az account set --subscription <workshop-subscription-id>
 az account show --query "{name:name, sub:id, tenant:tenantId}" -o table
 ```
 
-**Expected output**
+The subscription ID comes from your facilitator. You only need
+**read** access at the workshop subscription scope — the facilitator
+has already provisioned everything.
 
+## Step 2 — Read your handout
+
+Your facilitator hands you a printed slip with values like:
+
+```text
+ATTENDEE         attendee-03
+NAMESPACE        attendee-03
+APIM_GATEWAY_URL https://apim-aigw-xxx.azure-api.net
+APIM_KEY         <long random string — treat like a password>
+AKS_NAME         aks-aigw-xxx
+RESOURCE_GROUP   rg-aigw-workshop
+GPT_DEPLOYMENT   gpt-5-mini
+EMBEDDING        text-embedding-3-large
+COSMOS_ENDPOINT  https://...
+SEARCH_ENDPOINT  https://...
+KEY_VAULT_URI    https://...
+APP_INSIGHTS_CONN_STRING InstrumentationKey=...
 ```
-Name                                   Sub                                    Tenant
--------------------------------------  -------------------------------------  ------------------------------------
-<your-workshop-account>                xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx   xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-```
 
-Real values are unique to your subscription — keep them out of screenshots
-and chat threads.
-
-## Step 2 — Get your attendee handout
-
-Each attendee has a number from `01` to `10`. Your facilitator gives you
-yours. Replace `03` below with your own.
+Export the two values every lab needs:
 
 ```bash
-cd hybrid-ai-platform-workshop
-./scripts/print-attendee-handout.sh 03
+export APIM_GATEWAY_URL="https://apim-aigw-xxx.azure-api.net"
+export APIM_KEY="..."
+export NAMESPACE="attendee-03"
 ```
 
-The handout prints your APIM subscription key, your Kubernetes namespace
-(`attendee-03`), and the shared backend endpoints. Treat the key like a
-password — do not paste it into Slack or commit it to Git.
+:::caution Sensitive
+`APIM_KEY` is your subscription key — treat it like a password. Do not
+paste it into Slack, email, or screenshots; do not commit it to git.
+:::
 
 ## Step 3 — Connect to the shared AKS cluster
 
 ```bash
-RG=rg-aigw-workshop
-AKS=$(terraform -chdir=infra output -raw aks_name)
+RG=rg-aigw-workshop          # from your handout
+AKS=aks-aigw-xxx             # from your handout
 
 az aks get-credentials -g "$RG" -n "$AKS" --overwrite-existing
-kubectl config set-context --current --namespace=attendee-03
-kubectl get nodes -o wide
+kubectl config set-context --current --namespace="$NAMESPACE"
 ```
 
-**Expected output** — three or more `Ready` Azure Linux nodes:
-
-```
-NAME                              STATUS   ROLES    AGE   VERSION    OS-IMAGE
-aks-system-xxxxxxxx-vmss000000    Ready    <none>   1d    v1.31.4    Azure Linux 3.0
-aks-system-xxxxxxxx-vmss000001    Ready    <none>   1d    v1.31.4    Azure Linux 3.0
-```
-
-Verify your namespace already has the workshop bootstrap resources:
+Verify your namespace is already populated by the facilitator's bootstrap:
 
 ```bash
 kubectl get serviceaccount,secretproviderclass,secret
 ```
 
 You should see `agent-sa`, `azure-kv-shared`, and `apim-credentials`. If
-any are missing, the facilitator has not yet run
-`scripts/bootstrap-attendees.sh` — flag it and skip ahead.
+any are missing, flag your facilitator — they haven't run the attendee
+bootstrap yet.
 
 ## Step 4 — Send your first gateway request
 
@@ -134,13 +108,10 @@ This is the moment of truth: a request from your laptop → APIM in
 Indonesia Central → Azure OpenAI in Southeast Asia → back to your laptop.
 
 ```bash
-APIM_GATEWAY=$(terraform -chdir=infra output -raw apim_gateway_url)
-APIM_KEY=$(kubectl get secret apim-credentials \
-  -o jsonpath='{.data.subscription-key}' | base64 -d)
-
 curl -sS \
-  "${APIM_GATEWAY}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+  -H "x-auth-mode: anonymous" \
   -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"Reply in one short sentence."}]}' \
   | jq -r '.choices[0].message.content'
@@ -162,7 +133,9 @@ The sky is blue because of Rayleigh scattering.
 5. AOAI returned a completion; APIM emitted final token counts; the
    response came back to you.
 
-Open Application Insights (the facilitator shares the URL) and run:
+If your facilitator gave you `APP_INSIGHTS_CONN_STRING` and granted you
+**Log Analytics Reader** on the workspace, you can also query your
+request:
 
 ```kusto
 customMetrics
@@ -172,7 +145,9 @@ customMetrics
 | take 10
 ```
 
-You should see your own request, tagged with your `Subscription ID`.
+You should see your own request, tagged with your `Subscription ID`. If
+you don't have reader access, ask your facilitator for a screenshot
+during the workshop — it'll come up again in M2.
 
 ## Step 5 — Install the Python stack
 

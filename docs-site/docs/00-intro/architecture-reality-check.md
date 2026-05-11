@@ -105,28 +105,12 @@ Source: [APIM region availability](https://learn.microsoft.com/azure/api-managem
 
 ## Verify the landing zone is reachable
 
-Before continuing to M1, run the smoke test:
+The facilitator runs the
+[`smoke-test`](../90-facilitator-guide/provision.md) script the morning
+of the workshop. If you completed M0.1 Step 4 and got a response back
+from the gateway, the landing zone is up — proceed to M1.
 
-```bash
-cd hybrid-ai-platform-workshop
-./scripts/smoke-test.sh
-```
-
-**Expected output** — all green checks. Sample:
-
-```
-✓ Resource group rg-aigw-workshop present
-✓ APIM apim-aigw-<suffix> (state=Succeeded)
-✓ AKS aks-aigw-<suffix> (state=Succeeded)
-✓ AOAI endpoint https://aoai-aigw-sea-<suffix>.openai.azure.com reachable
-✓ Attendee namespaces: 10 / 10
-✓ Cilium running (3 pods in kube-system)
-✓ Key Vault CSI driver running (6 pods)
-```
-
-If any check fails, see the
-[troubleshooting guide](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/scripts/smoke-test.sh)
-or ask your facilitator.
+If your curl returned a non-2xx, flag your facilitator before continuing.
 
 ## Next
 

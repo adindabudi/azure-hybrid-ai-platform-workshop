@@ -29,11 +29,10 @@ gateway-grade observability for free.
 
 - M0 Python install done (with the pinned LangChain trio).
 - An `APPLICATIONINSIGHTS_CONNECTION_STRING` you can export — read it
-  from your handout or:
+  from your handout (`APP_INSIGHTS_CONN_STRING`):
 
 ```bash
-export APPLICATIONINSIGHTS_CONNECTION_STRING=$(\
-  terraform -chdir=infra output -raw application_insights_connection_string)
+export APPLICATIONINSIGHTS_CONNECTION_STRING="$APP_INSIGHTS_CONN_STRING"
 ```
 
 ## Step 1 — A LangChain chain you might already have
@@ -69,9 +68,8 @@ if __name__ == "__main__":
 Run it:
 
 ```bash
-export APIM_URL=$(terraform -chdir=infra output -raw apim_gateway_url)
-export APIM_KEY=$(kubectl get secret apim-credentials \
-  -o jsonpath='{.data.subscription-key}' | base64 -d)
+export APIM_URL="$APIM_GATEWAY_URL"     # both from your M0 handout
+# APIM_KEY is already exported
 
 python apps/migration-langgraph-to-maf/before.py
 ```

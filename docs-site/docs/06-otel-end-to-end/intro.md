@@ -38,11 +38,11 @@ them into one transaction.
 - M4 done — you have a working MAF agent.
 - M0 Python install — `microsoft-agents-a365-observability-extensions-agent-framework`
   and `azure-monitor-opentelemetry` are installed.
-- The connection string for the workshop App Insights:
+- The connection string for the workshop App Insights — from your M0
+  handout (`APP_INSIGHTS_CONN_STRING`):
 
 ```bash
-export APPLICATIONINSIGHTS_CONNECTION_STRING=$(\
-  terraform -chdir=infra output -raw application_insights_connection_string)
+export APPLICATIONINSIGHTS_CONNECTION_STRING="$APP_INSIGHTS_CONN_STRING"
 ```
 
 The string has the form

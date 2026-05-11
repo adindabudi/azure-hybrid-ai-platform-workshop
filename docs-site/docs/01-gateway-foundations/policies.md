@@ -1,161 +1,41 @@
 ---
-title: 1.1 — Apply the AI-gateway policies
+title: 1.1 — Walk through the AI-gateway policies
 sidebar_position: 2
 ---
 
-# M1.1 — Apply the AI-gateway policies
+# M1.1 — Walk through the AI-gateway policies
 
 ## What you will accomplish
 
 In this 55-minute hands-on module you will:
 
-- Onboard **Azure OpenAI** (Singapore) as an APIM backend with managed
-  identity auth.
-- Onboard a **self-hosted Phi-4-mini SLM** (AKS) as a second backend.
-- Apply the `llm-token-limit` policy and verify the 429 path.
-- Apply the **semantic cache** pair and verify the cache hit.
-- Configure a **priority-based load balancer** and kill the primary key
-  to verify automatic failover.
-- Route by header to either model with one `<choose>` block.
+- Read the **policy XML** your facilitator already applied to the
+  gateway — line by line, so you can take the same XML to your customer.
+- Verify the **`llm-token-limit`** policy by triggering a 429.
+- Verify the **semantic cache** by replaying an identical prompt.
+- Verify the **priority load balancer** by reading the `.model` field.
+- Verify **header-based routing** between AOAI and the self-hosted SLM.
+
+Everything is verified with `curl` against your APIM gateway. You do not
+need to register backends or paste policy XML yourself — your facilitator
+did that on the shared APIM. See the
+[Facilitator Guide](../facilitator-guide/apply-policies) if you're
+running this on your own subscription.
 
 ## Prerequisites
 
-- M0 completed (you can `curl` the gateway and get a completion back).
-- `az` and `kubectl` configured against the shared workshop landing zone.
-- Your APIM subscription key in `apim-credentials` secret.
+- M0 done — you can `curl` the gateway and get a completion back.
+- `APIM_GATEWAY_URL` and `APIM_KEY` exported in your shell.
 
-The full XML for every policy in this module is in
-[`policies/`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/tree/main/policies)
-in the repo. Each fragment has been **schema-validated offline** against
-the May 2026 Microsoft Learn reference.
+The full policy bundle that's applied to the gateway is in
+[`policies/workshop-llm-policy.xml`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/policies/workshop-llm-policy.xml).
+Each fragment has been **schema-validated** against the May 2026
+Microsoft Learn reference.
 
-## Step 1 — Verify your APIM instance
+Admins setting this up themselves: see the
+[Facilitator Guide](../90-facilitator-guide/apply-policies.md).
 
-Set environment variables once at the top — every subsequent command
-uses them.
-
-```bash
-export RG=rg-aigw-workshop
-export APIM=$(terraform -chdir=infra output -raw apim_name)
-export APIM_GATEWAY=$(terraform -chdir=infra output -raw apim_gateway_url)
-export APIM_KEY=$(kubectl get secret apim-credentials \
-  -o jsonpath='{.data.subscription-key}' | base64 -d)
-
-az apim show -g "$RG" -n "$APIM" \
-  --query "{state: provisioningState, sku: sku.name}" -o table
-```
-
-**Expected output**
-
-```
-State      Sku
----------  ---------
-Succeeded  Developer
-```
-
-## Step 1.5 — Create the OpenAI API in APIM
-
-Policies attach to APIs. Before applying anything, register the AOAI
-deployment as an APIM **API resource**. Microsoft publishes the
-OpenAPI specification for the AOAI inference data plane on GitHub; we
-import that, pointed at our AOAI Singapore endpoint.
-
-```bash
-# Download the official 2024-10-21 GA spec
-curl -sS -o /tmp/aoai.json \
-  "https://raw.githubusercontent.com/Azure/azure-rest-api-specs/main/specification/cognitiveservices/data-plane/AzureOpenAI/inference/stable/2024-10-21/inference.json"
-
-# Patch the spec to point at YOUR AOAI account (the spec ships with a
-# placeholder). The Python one-liner edits the JSON in place.
-AOAI_HOST=$(terraform -chdir=infra output -raw aoai_endpoint | sed 's|https://||; s|/$||')
-python - <<PY
-import json
-spec = json.load(open("/tmp/aoai.json"))
-spec["servers"] = [{
-    "url": "https://${AOAI_HOST}/openai",
-    "variables": {"endpoint": {"default": "${AOAI_HOST}"}}
-}]
-json.dump(spec, open("/tmp/aoai.json", "w"))
-PY
-
-# Import as an APIM API. Path "openai" matches the path the AOAI SDK uses.
-az apim api import \
-  -g "$RG" --service-name "$APIM" \
-  --api-id openai \
-  --display-name "Azure OpenAI" \
-  --path openai \
-  --specification-format OpenApiJson \
-  --specification-path /tmp/aoai.json \
-  --protocols https
-```
-
-### Verify
-
-```bash
-az apim api show -g "$RG" --service-name "$APIM" --api-id openai \
-  --query "{name: displayName, path: path, protocols: protocols}" -o table
-```
-
-**Expected output**
-
-```
-Name          Path    Protocols
-------------  ------  ---------
-Azure OpenAI  openai  ['https']
-```
-
-Source: [Import an Azure OpenAI API as a REST API](https://learn.microsoft.com/azure/api-management/azure-openai-api-from-specification).
-
-## Step 2 — Register the AOAI backend with managed identity
-
-The `llm-*` policies require the backend to authenticate via the APIM
-system-assigned identity, not an API key
-([source](https://learn.microsoft.com/azure/api-management/llm-content-safety-policy#prerequisites)).
-
-```bash
-# 1. Get the APIM managed identity object ID
-APIM_MI=$(az apim show -g "$RG" -n "$APIM" \
-  --query "identity.principalId" -o tsv)
-
-# 2. Get the AOAI resource ID
-AOAI=$(terraform -chdir=infra output -raw aoai_endpoint \
-  | sed 's|https://||; s|\..*||')
-AOAI_ID=$(az cognitiveservices account show \
-  --resource-group "$RG" --name "$AOAI" --query id -o tsv)
-
-# 3. Grant Cognitive Services User on the AOAI account
-az role assignment create \
-  --assignee-object-id "$APIM_MI" \
-  --assignee-principal-type ServicePrincipal \
-  --role "Cognitive Services User" \
-  --scope "$AOAI_ID"
-
-# 4. Create the APIM backend pointing at AOAI
-AOAI_ENDPOINT=$(terraform -chdir=infra output -raw aoai_endpoint)
-az apim backend create \
-  --resource-group "$RG" --service-name "$APIM" \
-  --backend-id aoai-sea \
-  --url "$AOAI_ENDPOINT/openai" \
-  --protocol http \
-  --credentials-managed-identity-resource "https://cognitiveservices.azure.com" 2>/dev/null \
-  || echo "Backend already exists, continuing"
-```
-
-**Verify**
-
-```bash
-az apim backend show -g "$RG" --service-name "$APIM" --backend-id aoai-sea \
-  --query "{url:url, auth:credentials.managedIdentity}" -o table
-```
-
-You should see the endpoint URL and the audience
-`https://cognitiveservices.azure.com`.
-
-## Step 3 — Apply `llm-token-limit`
-
-Open the [APIM portal](https://portal.azure.com), navigate to your APIM →
-APIs → choose the OpenAI API → click **Design** → **Inbound processing**.
-Paste:
+## Step 1 — Read the token-limit policy
 
 ```xml
 <llm-token-limit
@@ -166,16 +46,23 @@ Paste:
     remaining-tokens-header-name="x-tokens-remaining" />
 ```
 
-Click **Save**.
+What each attribute does:
 
-### Verify
+- `counter-key` — what to bucket by. `context.Subscription.Id` means
+  each attendee key gets its own quota.
+- `tokens-per-minute="500"` — sliding-window budget per counter key.
+- `estimate-prompt-tokens="false"` — don't pre-charge; count the actual
+  response. Faster, less accurate at edge.
+- `tokens-*-header-name` — APIM injects these response headers so
+  callers can self-throttle.
 
-Send one request and observe the headers:
+### Verify with curl
 
 ```bash
 curl -sS -i \
-  "${APIM_GATEWAY}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+  -H "x-auth-mode: anonymous" \
   -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"Say hi."}]}' \
   | grep -i "x-tokens-"
@@ -193,8 +80,9 @@ To trigger the **429**, hit the gateway in a loop:
 ```bash
 for i in $(seq 1 30); do
   curl -sS -o /dev/null -w "%{http_code}\n" \
-    "${APIM_GATEWAY}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+    "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
     -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+    -H "x-auth-mode: anonymous" \
     -H "Content-Type: application/json" \
     -d '{"messages":[{"role":"user","content":"Write a 200-word essay."}]}'
 done | sort | uniq -c
@@ -211,29 +99,14 @@ numbers don't match
 ([source](https://learn.microsoft.com/azure/api-management/llm-token-limit-policy)).
 :::
 
-## Step 4 — Add the semantic cache
+## Step 2 — Read the semantic cache pair
 
 The cache uses an embedding backend to vector-compare incoming prompts
-against recent ones. Grant the APIM MI access to the embedding deployment
-first (same role assignment scope from Step 2 already covers it because
-the embedding lives in the same AOAI account).
-
-Create the embedding backend:
-
-```bash
-az apim backend create \
-  --resource-group "$RG" --service-name "$APIM" \
-  --backend-id embeddings-backend \
-  --url "${AOAI_ENDPOINT}/openai/deployments/text-embedding-3-large" \
-  --protocol http \
-  --credentials-managed-identity-resource "https://cognitiveservices.azure.com" 2>/dev/null \
-  || echo "Backend already exists, continuing"
-```
-
-In the same **Inbound processing** XML, add **after** the
-`<llm-token-limit>` block:
+against recent ones. The inbound side does lookup; the outbound side
+stores the response.
 
 ```xml
+<!-- inbound -->
 <llm-semantic-cache-lookup
     score-threshold="0.05"
     embeddings-backend-id="embeddings-backend"
@@ -242,13 +115,20 @@ In the same **Inbound processing** XML, add **after** the
 </llm-semantic-cache-lookup>
 ```
 
-In **Outbound processing**, add:
-
 ```xml
+<!-- outbound -->
 <llm-semantic-cache-store duration="60" />
 ```
 
-Click **Save**.
+What each attribute does:
+
+- `score-threshold="0.05"` — cosine similarity cutoff. Lower = stricter.
+- `embeddings-backend-id` + `embeddings-backend-auth` — the policy
+  schema only accepts `system-assigned` here. Your facilitator set this
+  up.
+- `<vary-by>` — partition the cache by subscription ID so attendees
+  don't share cache entries.
+- `duration="60"` — TTL on cached responses in seconds.
 
 ### Verify
 
@@ -260,15 +140,17 @@ prompt='{"messages":[{"role":"user","content":"What is the capital of Indonesia?
 
 # First call — populates the cache
 time curl -sS -o /dev/null \
-  "${APIM_GATEWAY}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+  -H "x-auth-mode: anonymous" \
   -H "Content-Type: application/json" \
   -d "$prompt"
 
 # Second call — should hit the cache
 time curl -sS -o /dev/null \
-  "${APIM_GATEWAY}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+  -H "x-auth-mode: anonymous" \
   -H "Content-Type: application/json" \
   -d "$prompt"
 ```
@@ -277,58 +159,11 @@ time curl -sS -o /dev/null \
 The cache policy only accepts `system-assigned` for the embeddings
 backend auth — no other value is allowed by the schema
 ([source](https://learn.microsoft.com/azure/api-management/llm-semantic-cache-lookup-policy#attributes)).
-If you forget the role assignment from Step 2, you'll see `401` errors
-from the embedding backend.
+This is the kind of constraint that doesn't show up until you have
+[debugged it](https://learn.microsoft.com/azure/api-management/llm-semantic-cache-lookup-policy#attributes) on a customer call — keep it in your back pocket.
 :::
 
-## Step 5 — Add the self-hosted SLM backend
-
-The workshop AKS already has a Phi-4-mini-instruct service running at
-`http://slm-phi4.slm.svc.cluster.local:8000`. The facilitator deployed it
-during pre-flight. Verify:
-
-```bash
-kubectl get svc -n slm
-```
-
-**Expected output**
-
-```
-NAME       TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)    AGE
-slm-phi4   ClusterIP   10.41.x.x     <none>        8000/TCP   1h
-```
-
-To make this reachable from APIM, expose it as a Service of type
-`LoadBalancer` with an **internal** annotation, or front it with an
-ingress that APIM can reach. For the workshop we use the simpler path
-(internal load balancer):
-
-```bash
-kubectl annotate svc slm-phi4 -n slm \
-  service.beta.kubernetes.io/azure-load-balancer-internal=true \
-  --overwrite
-
-# Wait for the IP
-kubectl get svc slm-phi4 -n slm -w
-# Ctrl-C once EXTERNAL-IP shows a 10.40.x.x address
-```
-
-Register the backend:
-
-```bash
-SLM_IP=$(kubectl get svc slm-phi4 -n slm \
-  -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-
-az apim backend create \
-  --resource-group "$RG" --service-name "$APIM" \
-  --backend-id slm-phi4 \
-  --url "http://${SLM_IP}:8000/v1" \
-  --protocol http
-```
-
-## Step 6 — Header-based routing
-
-Add to **Inbound processing**:
+## Step 3 — Read the header-based routing
 
 ```xml
 <choose>
@@ -341,13 +176,19 @@ Add to **Inbound processing**:
 </choose>
 ```
 
+A `<choose>` block with `<when>`/`<otherwise>` is the APIM idiom for
+"if/else". `backend-id` is the APIM **backend** the request gets routed
+to — `slm-phi4` is the self-hosted Phi-4-mini on AKS, `aoai-sea` is the
+managed AOAI in Singapore.
+
 ### Verify
 
 ```bash
 # Premium tier → AOAI
 curl -sS \
-  "${APIM_GATEWAY}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+  -H "x-auth-mode: anonymous" \
   -H "x-model-tier: premium" \
   -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"Identify yourself in one sentence."}]}' \
@@ -355,8 +196,9 @@ curl -sS \
 
 # Cheap tier → self-hosted Phi-4
 curl -sS \
-  "${APIM_GATEWAY}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+  -H "x-auth-mode: anonymous" \
   -H "x-model-tier: cheap" \
   -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"Identify yourself in one sentence."}]}' \
@@ -365,98 +207,63 @@ curl -sS \
 
 The `.model` field tells you which backend served the request.
 
-## Step 7 — Priority-based load balancing with failover
+## Step 4 — Priority-based load balancing with failover
 
-Create a **backend pool** that includes both backends with different
-priorities. APIM Backend Pools is part of the
+The gateway is also wired up with a **backend pool** that fails over
+from AOAI to the SLM when the primary backend is unreachable. APIM
+Backend Pools live in the
 [`backends` API](https://learn.microsoft.com/azure/api-management/backends).
 
-```bash
-az apim backend create \
-  --resource-group "$RG" --service-name "$APIM" \
-  --backend-id aoai-pool \
-  --type Pool \
-  --url "https://placeholder" \
-  --pool '{"services":[{"id":"/backends/aoai-sea","priority":1,"weight":100},{"id":"/backends/slm-phi4","priority":2,"weight":100}]}'
-```
+You can't see the failover from the data plane directly — the policy
+routes to `aoai-pool` and APIM picks the priority-1 backend (`aoai-sea`)
+unless it's unhealthy, in which case priority-2 (`slm-phi4`) takes over.
+Your facilitator will demo the failover live; the policy XML is in
+[`policies/load-balancer-priority.xml`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/policies/load-balancer-priority.xml).
 
-Replace your routing `<choose>` with:
-
-```xml
-<set-backend-service backend-id="aoai-pool" />
-```
-
-### Verify failover
-
-Temporarily break the AOAI backend by setting an invalid override URL:
-
-```bash
-az apim backend update \
-  --resource-group "$RG" --service-name "$APIM" \
-  --backend-id aoai-sea \
-  --url "https://invalid-host-do-not-exist.example.com"
-
-# Should still get a response, served by the SLM
-curl -sS \
-  "${APIM_GATEWAY}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
-  -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
-  -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":"Say hi."}]}' \
-  | jq -r '.choices[0].message.content'
-
-# Restore
-az apim backend update \
-  --resource-group "$RG" --service-name "$APIM" \
-  --backend-id aoai-sea \
-  --url "${AOAI_ENDPOINT}/openai"
-```
-
-## Step 8 — Verify every policy with one script
+## Step 5 — Verify every policy with one script
 
 The repo ships a verifier at
 [`scripts/verify-policies.sh`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/scripts/verify-policies.sh).
-Run it after Steps 1–7 to confirm every applied policy is doing its job.
+Run it after Steps 1–4 to confirm every applied policy is doing its job.
 The script reads `APIM_GATEWAY_URL` and `APIM_KEY` from your environment
-(both come from the handout your facilitator gave you — no Terraform
-state required).
+(both come from your handout — no Terraform state required).
 
 ```bash
-export APIM_GATEWAY_URL="https://aigw-xxx.azure-api.net"   # from handout
-export APIM_KEY="..."                                       # from handout
 ./scripts/verify-policies.sh
 ```
 
 **Expected output**
 
 ```
-✓ Step 1.5 — API resource 'openai' present
-✓ Step 2  — Backend 'aoai-sea' with managed identity
-✓ Step 3  — llm-token-limit: x-tokens-consumed header present
-✓ Step 3  — llm-token-limit: 429 after exceeding budget
-✓ Step 4  — semantic-cache: second identical request < 200 ms
-✓ Step 6  — header routing: x-model-tier=premium → aoai-sea
-✓ Step 6  — header routing: x-model-tier=cheap → slm-phi4
-✓ Step 7  — backend pool: failover to SLM when primary down
+✓ Step 3 — llm-token-limit: x-tokens-consumed header present
+✓ Step 3 — llm-token-limit: 429 observed after burst
+✓ Step 4 — semantic-cache: 2nd request was < half of first
+✓ Step 6 — header routing: premium → gpt-5-mini ; cheap → phi-4-mini-instruct
+- Step 1.5 — API resource check skipped (set RG and APIM_NAME to enable)
+- Step 2   — Backend MI check skipped (set RG and APIM_NAME to enable)
 
-8/8 policies verified.
+All policy checks passed (2 admin-only checks skipped).
 ```
 
-If any line shows `✗`, re-read the corresponding step and re-apply the
-policy in the APIM portal.
+The dashes (`-`) are admin-only checks that are skipped on your laptop —
+that's expected. If any line shows `✗`, flag your facilitator.
 
-## What you just built
+## What the gateway runs for you
 
-A single OpenAI-compatible endpoint that:
+Every request you send through `${APIM_GATEWAY_URL}/openai/...`:
 
-1. **Caches** repeat requests and returns them in ~40 ms.
-2. **Counts tokens** per subscription and rejects with `429` past the
-   budget.
-3. **Routes** by header to either a managed cloud model or a self-hosted
-   SLM.
-4. **Fails over** automatically when the primary backend is unreachable.
+1. **Authenticates** — JWT validation kicks in unless you pass
+   `x-auth-mode: anonymous` (you'll add real auth in M2).
+2. **Caches** — checks the semantic cache; identical prompts return in ~40 ms.
+3. **Counts tokens** — per-subscription quota with a 429 past budget.
+4. **Routes** — by header to either a managed cloud model or a
+   self-hosted SLM.
+5. **Fails over** — automatically when the primary backend is unreachable.
+6. **Emits telemetry** — 5-dimension token metrics into App Insights
+   (you'll dashboard this in M2).
 
 Without the gateway, every one of those features lives in your application
-code. Now you can ship 30 apps and only worry about prompts.
+code. With it, you can ship 30 apps and only worry about prompts.
 
 ## Reference
 
@@ -465,6 +272,7 @@ code. Now you can ship 30 apps and only worry about prompts.
 - [APIM `llm-semantic-cache-lookup` policy](https://learn.microsoft.com/azure/api-management/llm-semantic-cache-lookup-policy)
 - [APIM `llm-semantic-cache-store` policy](https://learn.microsoft.com/azure/api-management/llm-semantic-cache-store-policy)
 - [APIM backend pools](https://learn.microsoft.com/azure/api-management/backends)
+- Admin steps to apply these policies: [Facilitator Guide → Apply policies](../90-facilitator-guide/apply-policies.md)
 
 ## Next
 
