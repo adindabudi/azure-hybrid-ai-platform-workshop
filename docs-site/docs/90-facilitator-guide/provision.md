@@ -84,12 +84,31 @@ Expected — all green:
 ✓ APIM apim-aigw-<suffix> (state=Succeeded)
 ✓ AKS aks-aigw-<suffix> (state=Succeeded)
 ✓ AOAI endpoint https://aoai-aigw-sea-<suffix>.openai.azure.com reachable
-✓ Attendee namespaces: 0 / 10        # zero is fine until you bootstrap
+✗ Attendee namespaces: 0 / 10 — run ./scripts/bootstrap-attendees.sh
 ✓ Cilium running (3 pods in kube-system)
 ✓ Key Vault CSI driver running (6 pods)
 ```
 
-If any check fails, fix before continuing to attendee provisioning.
+The attendee-namespace line will be **red** until you run the bootstrap
+in [Provision attendees](./attendees.md). That's expected immediately
+after `terraform apply`. Re-run smoke-test after bootstrap and confirm:
+
+```
+✓ Attendee namespaces: 10 / 10 (spot-check attendee-01: agent-sa, apim-credentials, azure-kv-shared all present)
+```
+
+If any **other** check fails red, fix before continuing to attendee
+provisioning.
+
+:::warning Don't hand out keys before this line is green
+The check spot-checks that `attendee-01` actually has `agent-sa`,
+`apim-credentials`, and the `azure-kv-shared` SecretProviderClass. If
+the line says `present, but attendee-01 missing: …`, the bootstrap
+partially failed — re-run `./scripts/bootstrap-attendees.sh` (it's
+idempotent) before sending out handouts. Otherwise attendees will hit
+*"No resources found"* on Step 4c of their setup and you'll be
+firefighting during the workshop.
+:::
 
 ## What got deployed
 

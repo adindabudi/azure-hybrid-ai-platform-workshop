@@ -58,9 +58,27 @@ else
   yellow "APIM gateway 401/404 (normal for an unauthed probe)"
 fi
 
-# 6. Attendee namespaces
+# 6. Attendee namespaces — must match attendee_count AND be fully bootstrapped.
+EXPECTED=$(terraform output -json attendee_handout 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
 NS_COUNT=$(kubectl get ns -o name 2>/dev/null | grep -c '^namespace/attendee-' || echo 0)
-green "Attendee namespaces: $NS_COUNT / 10"
+
+if (( NS_COUNT == 0 )); then
+  red "Attendee namespaces: 0 / $EXPECTED — run ./scripts/bootstrap-attendees.sh"
+elif (( NS_COUNT != EXPECTED )); then
+  red "Attendee namespaces: $NS_COUNT / $EXPECTED — re-run ./scripts/bootstrap-attendees.sh"
+else
+  # Spot-check the first attendee actually has agent-sa + apim-credentials + SPC.
+  FIRST_NS=$(kubectl get ns -o name 2>/dev/null | grep '^namespace/attendee-' | sort | head -1 | sed 's|namespace/||')
+  MISSING=()
+  kubectl get sa agent-sa -n "$FIRST_NS" >/dev/null 2>&1 || MISSING+=("sa/agent-sa")
+  kubectl get secret apim-credentials -n "$FIRST_NS" >/dev/null 2>&1 || MISSING+=("secret/apim-credentials")
+  kubectl get secretproviderclass azure-kv-shared -n "$FIRST_NS" >/dev/null 2>&1 || MISSING+=("spc/azure-kv-shared")
+  if (( ${#MISSING[@]} == 0 )); then
+    green "Attendee namespaces: $NS_COUNT / $EXPECTED (spot-check $FIRST_NS: agent-sa, apim-credentials, azure-kv-shared all present)"
+  else
+    red "Attendee namespaces: $NS_COUNT / $EXPECTED present, but $FIRST_NS missing: ${MISSING[*]} — re-run ./scripts/bootstrap-attendees.sh"
+  fi
+fi
 
 # 7. Cilium pods
 CILIUM_PODS=$(kubectl get pods -n kube-system -l k8s-app=cilium -o name 2>/dev/null | wc -l)
