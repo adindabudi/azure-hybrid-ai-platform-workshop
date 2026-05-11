@@ -118,7 +118,78 @@ az apim backend create \
   --pool '{"services":[{"id":"/backends/aoai-sea","priority":1,"weight":100},{"id":"/backends/slm-phi4","priority":2,"weight":100}]}'
 ```
 
-### 6. Paste the M1 + M2 policy bundle
+### 6. Wire the App Insights diagnostic on the openai API (required for `llm-emit-token-metric`)
+
+The `<llm-emit-token-metric>` policy is silent if the API doesn't have
+an `applicationinsights` diagnostic with `metrics: true`. Without this
+step, attendees will see an empty result when they run the M0.1 KQL
+query against `customMetrics` even though the policy is in place
+([MS Learn — Emit custom metrics](https://learn.microsoft.com/azure/api-management/api-management-howto-app-insights#emit-custom-metrics)).
+
+The Azure CLI `az apim` group doesn't expose this property directly,
+so call the management API:
+
+```bash
+APIM_ID=$(az apim show -g "$RG" -n "$APIM" --query id -o tsv)
+
+cat > /tmp/diag.json <<JSON
+{
+  "properties": {
+    "loggerId": "${APIM_ID}/loggers/appi-logger",
+    "sampling": { "samplingType": "fixed", "percentage": 100 },
+    "alwaysLog": "allErrors",
+    "logClientIp": true,
+    "metrics": true,
+    "verbosity": "information",
+    "httpCorrelationProtocol": "W3C",
+    "frontend": {
+      "request":  { "headers": [], "body": { "bytes": 0 } },
+      "response": { "headers": [], "body": { "bytes": 0 } }
+    },
+    "backend": {
+      "request":  { "headers": [], "body": { "bytes": 0 } },
+      "response": { "headers": [], "body": { "bytes": 0 } }
+    }
+  }
+}
+JSON
+
+az rest --method put \
+  --url "https://management.azure.com${APIM_ID}/apis/openai/diagnostics/applicationinsights?api-version=2024-05-01" \
+  --body @/tmp/diag.json \
+  --query '{name:name, loggerId:properties.loggerId, metrics:properties.metrics}' -o jsonc
+```
+
+Expected output:
+
+```json
+{
+  "loggerId": ".../loggers/appi-logger",
+  "metrics": true,
+  "name": "applicationinsights"
+}
+```
+
+After the policy is pasted (next step) and the first attendee request
+flows through, you can confirm metrics are landing:
+
+```bash
+APPI_APPID=$(az resource show \
+  -g "$RG" -n appi-aigw-$(echo "$APIM" | awk -F- '{print $NF}') \
+  --resource-type Microsoft.Insights/components \
+  --query 'properties.AppId' -o tsv)
+
+az rest --method post \
+  --url "https://api.applicationinsights.io/v1/apps/${APPI_APPID}/query" \
+  --resource "https://api.applicationinsights.io" \
+  --body '{"query":"customMetrics | where name == \"Total Tokens\" | where timestamp > ago(15m) | take 5"}' \
+  --query 'tables[0].rows | length(@)'
+```
+
+A non-zero number means metrics are flowing. Custom-metrics ingestion
+latency is ~1 minute.
+
+### 7. Paste the M1 + M2 policy bundle
 
 Open the [APIM portal](https://portal.azure.com) → your APIM → **APIs** →
 **Azure OpenAI** → **Design** → **All operations** → **Inbound

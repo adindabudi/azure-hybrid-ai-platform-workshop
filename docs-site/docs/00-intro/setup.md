@@ -410,6 +410,34 @@ customMetrics
 | take 10
 ```
 
+:::tip Got "No results found" but you're sure the request succeeded?
+Three things to check, in order:
+
+1. **Wait ~1 minute** — custom-metrics ingestion is async (~30-60 s
+   after `200 OK`).
+2. **Did your facilitator finish provisioning?** The token metric is
+   emitted by the `llm-emit-token-metric` policy on the `openai` API
+   and requires the API to have an `applicationinsights` diagnostic
+   with `metrics: true`. If your facilitator skipped that step (M1
+   "Apply policies" — step 6 in the facilitator guide), no attendee
+   will see metrics. Ask them to check.
+3. **Widen the window**: `ago(5m)` → `ago(30m)`. If your request was
+   more than 5 minutes ago, that's it.
+
+If your App Insights resource is **workspace-based** (most
+deployments since 2023, including this workshop's), the same data also
+lives in the underlying Log Analytics workspace as the **`AppMetrics`**
+table — useful if you're querying from a workbook or alert rule:
+
+```kusto
+AppMetrics
+| where Name == "Total Tokens"
+| where TimeGenerated > ago(5m)
+| project TimeGenerated, Properties, Sum
+| take 10
+```
+:::
+
 You should see your own request, tagged with your `Subscription ID`. If
 you don't have reader access, ask your facilitator for a screenshot
 during the workshop — it'll come up again in M2.
