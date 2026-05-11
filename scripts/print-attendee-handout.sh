@@ -46,6 +46,13 @@ cat <<HANDOUT
    AI GATEWAY WORKSHOP — Connection details for ${NS}
 =================================================================
 
+== Step 0: WSL users — install az INSIDE WSL (not the Windows MSI) ==
+  which az kubectl    # both should end in /usr/bin/  (or both .exe)
+  # If "az" is .exe but "kubectl" isn't, run:
+  #   curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash && hash -r
+  # Otherwise az.exe writes kubeconfig to C:\\Users\\you\\.kube\\config
+  # and your Linux kubectl will see "no current context is set".
+
 == Step 1: Get AKS credentials (creates your kubectl context) ==
   az login
   az account set --subscription <subscription-id>
@@ -55,7 +62,7 @@ cat <<HANDOUT
 == Step 2: Pin your namespace as the default ==
   kubectl config set-context --current --namespace=${NS}
   kubectl get all          # should be empty initially
-  # If you see "error: no current context is set" — you skipped Step 1.
+  # If you see "error: no current context is set" — re-read Step 0.
 
 == APIM ==
   Gateway URL              : ${APIM_GATEWAY}

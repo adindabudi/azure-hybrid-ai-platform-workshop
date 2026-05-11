@@ -38,6 +38,19 @@ If anything is missing, install:
 [Python 3.13](https://www.python.org/downloads/),
 [Node 20](https://nodejs.org/).
 
+:::warning Windows + WSL users — install `az` *inside* WSL
+If you're running this lab in WSL, install Azure CLI **in your WSL
+distro** (`curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash`),
+not the Windows MSI. WSL inherits the Windows `PATH`, so `az.exe` will
+silently shadow whatever you intend to use and write `kubeconfig` to
+`C:\Users\<you>\.kube\config` — but your WSL `kubectl` reads
+`/home/<you>/.kube/config`. The result is `kubectl config set-context`
+returning *"no current context is set"* even though `az aks
+get-credentials` succeeded. Mixing OS sides is the #1 setup failure for
+this workshop. See **Step 4a** below for the recovery path if you've
+already hit it.
+:::
+
 ## Step 1 — Clone the workshop repo
 
 Every subsequent module references files in this repo
@@ -100,19 +113,9 @@ Your handout lists `RESOURCE_GROUP` and `AKS_NAME` — substitute them
 below. The resource group is the same for every attendee; the AKS name
 has a random suffix (e.g. `aks-aigw-7f2a`).
 
-### 4a — Pull the kubeconfig (this is what creates your kubectl context)
-
 ```bash
 RG="rg-aigw-workshop"       # from your handout
 AKS="aks-aigw-xxx"          # from your handout — replace `xxx` with your real suffix
-
-az aks get-credentials --resource-group "$RG" --name "$AKS" --overwrite-existing
-```
-
-Expected last line:
-
-```text
-Merged "aks-aigw-xxx" as current context in /home/<you>/.kube/config
 ```
 
 :::tip Handout doesn't show the full AKS name?
@@ -123,29 +126,83 @@ az aks list -g "$RG" --query "[].name" -o tsv
 ```
 :::
 
-### 4b — Pin your namespace as the default
+### 4a — Make sure `az` and `kubectl` share the same kubeconfig
+
+This is the **most common stumbling block on Windows + WSL**, so check
+it *before* you call `az aks get-credentials`. Run:
 
 ```bash
-kubectl config set-context --current --namespace="$NAMESPACE"
-kubectl config current-context     # should print aks-aigw-xxx
+which az kubectl
 ```
 
-:::caution Got `error: no current context is set`?
-You skipped 4a. `kubectl config set-context --current` modifies the
-*current* context — if `~/.kube/config` has no clusters yet, there's
-nothing to modify. Re-run `az aks get-credentials` above, then re-run
-the `set-context` command.
-:::
+| Output | Meaning | Action |
+| --- | --- | --- |
+| Both end in `/usr/bin/...` (or both `.exe`) | Same OS — you're fine | Skip to **4b** |
+| `az` ends in `.exe` but `kubectl` does **not** (or vice versa) | You're in WSL but `az` is the Windows installer. They write/read different `kubeconfig` files. | Pick **one** option below, then go to 4b |
 
-### 4c — Verify your namespace bootstrap
+**Option A (recommended) — install `az` inside WSL** so both binaries
+share `~/.kube/config`
+([apt install per MS Learn](https://learn.microsoft.com/cli/azure/install-azure-cli-linux?pivots=apt)):
 
 ```bash
+curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+hash -r
+which az            # must now be /usr/bin/az
+az login            # re-login inside WSL
+```
+
+**Option B (quick) — point WSL `kubectl` at the Windows kubeconfig**
+that `az.exe` writes to:
+
+```bash
+WIN_USER="$(/mnt/c/Windows/System32/cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r')"
+export KUBECONFIG="/mnt/c/Users/${WIN_USER}/.kube/config"
+echo "export KUBECONFIG=\"$KUBECONFIG\"" >> ~/.bashrc   # persist for new shells
+```
+
+### 4b — Pull the kubeconfig
+
+```bash
+az aks get-credentials --resource-group "$RG" --name "$AKS" --overwrite-existing
+```
+
+Expected last line — **the path here must match where `kubectl` reads from**:
+
+```text
+Merged "aks-aigw-xxx" as current context in /home/<you>/.kube/config
+```
+
+If you see `C:\Users\...\.kube\config` instead and `kubectl` is your
+WSL Linux binary, you skipped 4a — fix it now or `kubectl` will keep
+saying *"no current context is set"*.
+
+### 4c — Pin your namespace and verify
+
+```bash
+kubectl config current-context           # must print aks-aigw-xxx
+kubectl config set-context --current --namespace="$NAMESPACE"
 kubectl get serviceaccount,secretproviderclass,secret
 ```
 
 You should see `agent-sa`, `azure-kv-shared`, and `apim-credentials`. If
 any are missing, flag your facilitator — they haven't run the attendee
 bootstrap yet.
+
+:::caution Still getting `error: no current context is set` or `connection refused 127.0.0.1:8080`?
+Both errors mean `kubectl` can't find a populated kubeconfig. Diagnose:
+
+```bash
+echo "KUBECONFIG=${KUBECONFIG:-<unset, defaults to ~/.kube/config>}"
+kubectl config view --minify        # should show a "current-context" line
+ls -la ~/.kube/config 2>/dev/null
+ls -la /mnt/c/Users/*/.kube/config 2>/dev/null
+```
+
+If a Windows-path config file exists but your `KUBECONFIG` is unset,
+you're hitting the WSL split-kubeconfig issue — go back to **4a Option B**.
+Background:
+[AKS — Config file isn't available when connecting](https://learn.microsoft.com/troubleshoot/azure/azure-kubernetes/connectivity/config-file-is-not-available-when-connecting).
+:::
 
 ## Step 5 — Send your first gateway request
 
