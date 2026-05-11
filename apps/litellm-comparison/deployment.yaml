@@ -1,0 +1,141 @@
+# LiteLLM standalone deployment — M4 Step 4(c).
+#
+# Three things go in here:
+#   1. ConfigMap holding litellm/config.yaml (model routing).
+#   2. Secret with the master API key + AOAI credentials.
+#   3. Deployment + ClusterIP Service exposing port 4000.
+#
+# Apply with:
+#   kubectl apply -n "$NS" -f apps/litellm-comparison/deployment.yaml
+#
+# The Secret carries placeholder values — the facilitator bootstrap
+# script (`scripts/bootstrap-attendees.sh`) overwrites them per
+# attendee namespace before applying.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+data:
+  config.yaml: |
+    model_list:
+      - model_name: gpt-5-mini-via-litellm
+        litellm_params:
+          model: azure/gpt-5-mini
+          api_base: os.environ/AZURE_API_BASE
+          api_key: os.environ/AZURE_API_KEY
+          api_version: "2024-10-21"
+    litellm_settings:
+      drop_params: true
+      num_retries: 2
+      request_timeout: 60
+    general_settings:
+      master_key: os.environ/LITELLM_MASTER_KEY
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: litellm-creds
+type: Opaque
+stringData:
+  # Replaced by scripts/bootstrap-attendees.sh per attendee.
+  master-key: "sk-REPLACE_ME"
+  azure-api-base: "https://aoai-aigw-sea-xxx.openai.azure.com"
+  azure-api-key: "REPLACE_ME"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  labels:
+    app: litellm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: litellm
+  template:
+    metadata:
+      labels:
+        app: litellm
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: proxy
+          image: ghcr.io/berriai/litellm:main-stable
+          imagePullPolicy: IfNotPresent
+          args: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
+          ports:
+            - containerPort: 4000
+              name: http
+          env:
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-creds
+                  key: master-key
+            - name: AZURE_API_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-creds
+                  key: azure-api-base
+            - name: AZURE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-creds
+                  key: azure-api-key
+          volumeMounts:
+            - name: config
+              mountPath: /etc/litellm
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/liveliness
+              port: 4000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: config
+          configMap:
+            name: litellm-config
+            items:
+              - key: config.yaml
+                path: config.yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  labels:
+    app: litellm
+spec:
+  type: ClusterIP
+  selector:
+    app: litellm
+  ports:
+    - port: 4000
+      targetPort: 4000
+      name: http

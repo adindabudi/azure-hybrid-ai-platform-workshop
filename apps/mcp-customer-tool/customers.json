@@ -1,0 +1,56 @@
+[
+  {
+    "customer_id": "CUST-1001",
+    "name": "Andi Saputra",
+    "phone": "+62-812-1111-0001",
+    "city": "Surabaya",
+    "tier": "platinum",
+    "card_last4_masked": "**** **** **** 4127",
+    "recent_complaints": [
+      {"date": "2026-05-09", "category": "transactional", "summary": "ATM swallowed card"},
+      {"date": "2026-04-22", "category": "informational", "summary": "Statement query"}
+    ]
+  },
+  {
+    "customer_id": "CUST-1002",
+    "name": "Putri Hartono",
+    "phone": "+62-813-2222-0002",
+    "city": "Jakarta",
+    "tier": "gold",
+    "card_last4_masked": "**** **** **** 8843",
+    "recent_complaints": [
+      {"date": "2026-05-07", "category": "account-access", "summary": "Mobile banking OTP not received"}
+    ]
+  },
+  {
+    "customer_id": "CUST-1003",
+    "name": "Budi Santoso",
+    "phone": "+62-821-3333-0003",
+    "city": "Bandung",
+    "tier": "silver",
+    "card_last4_masked": "**** **** **** 2210",
+    "recent_complaints": []
+  },
+  {
+    "customer_id": "CUST-1004",
+    "name": "Citra Lestari",
+    "phone": "+62-822-4444-0004",
+    "city": "Medan",
+    "tier": "gold",
+    "card_last4_masked": "**** **** **** 9981",
+    "recent_complaints": [
+      {"date": "2026-05-02", "category": "transactional", "summary": "Duplicate charge dispute"}
+    ]
+  },
+  {
+    "customer_id": "CUST-1005",
+    "name": "Dimas Pratama",
+    "phone": "+62-823-5555-0005",
+    "city": "Denpasar",
+    "tier": "platinum",
+    "card_last4_masked": "**** **** **** 5566",
+    "recent_complaints": [
+      {"date": "2026-05-10", "category": "general", "summary": "Wants to upgrade to private banking"}
+    ]
+  }
+]

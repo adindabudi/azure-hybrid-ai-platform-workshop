@@ -1,0 +1,33 @@
+# LiteLLM proxy config — used by apps/litellm-comparison/deployment.yaml.
+# Mounted into /etc/litellm/config.yaml inside the container.
+#
+# `model_name` is the *virtual* name the agent uses; `litellm_params`
+# is the actual backend. The same agent code can therefore talk to
+# AOAI through APIM, or LiteLLM, or both — without code changes.
+
+model_list:
+  # Virtual name the M4 walkthrough uses.
+  - model_name: gpt-5-mini-via-litellm
+    litellm_params:
+      model: azure/gpt-5-mini
+      api_base: os.environ/AZURE_API_BASE
+      api_key: os.environ/AZURE_API_KEY
+      api_version: "2024-10-21"
+
+  # Optional: also expose the self-hosted SLM behind LiteLLM so the same
+  # client can A/B between premium and cheap.
+  - model_name: phi-4-mini-via-litellm
+    litellm_params:
+      model: openai/phi-4-mini-instruct
+      api_base: http://phi4-mini.attendee-shared.svc.cluster.local:8000/v1
+      api_key: "sk-not-used"
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  num_retries: 2
+  request_timeout: 60
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: null

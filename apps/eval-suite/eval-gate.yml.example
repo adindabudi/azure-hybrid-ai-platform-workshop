@@ -1,0 +1,47 @@
+# Example PR-gating workflow — M5 Step 3.
+#
+# Copy to .github/workflows/eval.yml in your fork. The job runs the
+# Foundry evaluators on every PR that touches the agent or this
+# eval suite, and fails the check when scores regress below threshold.
+name: AI eval gate
+
+on:
+  pull_request:
+    paths:
+      - "apps/agent-complaint-triage/**"
+      - "apps/eval-suite/**"
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r apps/eval-suite/requirements.txt
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - run: |
+          export APIM_URL="${{ secrets.APIM_URL }}"
+          export APIM_KEY="${{ secrets.APIM_KEY }}"
+          python apps/eval-suite/run_foundry_evals.py
+      - name: Enforce thresholds
+        run: |
+          python - <<'PY'
+          import json, sys
+          report = json.load(open("apps/eval-suite/eval-results.json"))
+          metrics = report["metrics"]
+          ir = metrics["intent_resolution.pass_rate"]
+          tc = metrics["tool_call_accuracy.pass_rate"]
+          ok = ir >= 0.80 and tc >= 0.75
+          print(f"intent_resolution={ir:.2f}  tool_call_accuracy={tc:.2f}")
+          sys.exit(0 if ok else 1)
+          PY

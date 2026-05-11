@@ -1,0 +1,17 @@
+# M5 evaluation suite dependencies.
+#
+# Pin these to known-good versions for the workshop. Both packages
+# track Azure AI Foundry; bump versions in sync if you upgrade.
+
+# Foundry-style LLM-as-judge evaluators (IntentResolution, ToolCallAccuracy, etc.)
+azure-ai-evaluation[redteam]>=1.10.0,<2.0.0
+
+# Required by the [redteam] extra at runtime — provides the Foundry
+# project client used for cloud scans and result upload.
+azure-ai-projects>=2.0.0,<3.0.0
+
+# Auth for both evaluation and red-team flows.
+azure-identity>=1.17.1,<2.0.0
+
+# The Agent Framework client used by agent.py (the system under test).
+agent-framework>=1.0.0rc6

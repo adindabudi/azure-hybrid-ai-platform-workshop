@@ -1,0 +1,95 @@
+# The image tag is interpolated by the facilitator bootstrap script
+# (`scripts/bootstrap-attendees.sh`) — `${ACR_LOGIN_SERVER}` is replaced
+# with the workshop ACR before `kubectl apply`.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-customer-tool
+  labels:
+    app: mcp-customer-tool
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-customer-tool
+  template:
+    metadata:
+      labels:
+        app: mcp-customer-tool
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: server
+          image: ${ACR_LOGIN_SERVER}/mcp-customer-tool:1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8765
+              name: http
+          env:
+            - name: LOG_LEVEL
+              value: INFO
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            tcpSocket:
+              port: 8765
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8765
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-customer-tool
+  labels:
+    app: mcp-customer-tool
+spec:
+  type: ClusterIP
+  selector:
+    app: mcp-customer-tool
+  ports:
+    - port: 8765
+      targetPort: 8765
+      name: http
+---
+# Only allow ingress from the APIM self-hosted gateway namespace.
+# The gateway pods carry the label `azure-api-management/gateway=true`.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-customer-tool-allow-apim
+spec:
+  podSelector:
+    matchLabels:
+      app: mcp-customer-tool
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: apim
+        - podSelector:
+            matchLabels:
+              azure-api-management/gateway: "true"
+      ports:
+        - protocol: TCP
+          port: 8765
