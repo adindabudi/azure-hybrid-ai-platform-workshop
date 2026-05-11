@@ -85,7 +85,7 @@ cat <<HANDOUT
     \$ terraform output -raw application_insights_connection_string
 
 == APIM curl smoke-test ==
-  curl -s "${APIM_GATEWAY}/openai/openai/deployments/${GPT_DEPLOY}/chat/completions?api-version=2024-10-21" \\
+  curl -s "${APIM_GATEWAY}/openai/deployments/${GPT_DEPLOY}/chat/completions?api-version=2024-10-21" \\
     -H "Ocp-Apim-Subscription-Key: ${APIM_KEY:-<key>}" \\
     -H "Content-Type: application/json" \\
     -d '{"messages":[{"role":"user","content":"hello, what region am I talking to?"}]}'

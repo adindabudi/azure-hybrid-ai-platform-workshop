@@ -60,7 +60,7 @@ What each attribute does:
 
 ```bash
 curl -sS -i \
-  "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
   -H "Content-Type: application/json" \
@@ -80,7 +80,7 @@ To trigger the **429**, hit the gateway in a loop:
 ```bash
 for i in $(seq 1 30); do
   curl -sS -o /dev/null -w "%{http_code}\n" \
-    "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+    "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
     -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
     -H "x-auth-mode: anonymous" \
     -H "Content-Type: application/json" \
@@ -140,7 +140,7 @@ prompt='{"messages":[{"role":"user","content":"What is the capital of Indonesia?
 
 # First call — populates the cache
 time curl -sS -o /dev/null \
-  "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
   -H "Content-Type: application/json" \
@@ -148,7 +148,7 @@ time curl -sS -o /dev/null \
 
 # Second call — should hit the cache
 time curl -sS -o /dev/null \
-  "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
   -H "Content-Type: application/json" \
@@ -186,7 +186,7 @@ managed AOAI in Singapore.
 ```bash
 # Premium tier → AOAI
 curl -sS \
-  "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
   -H "x-model-tier: premium" \
@@ -196,7 +196,7 @@ curl -sS \
 
 # Cheap tier → self-hosted Phi-4
 curl -sS \
-  "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
   -H "x-model-tier: cheap" \

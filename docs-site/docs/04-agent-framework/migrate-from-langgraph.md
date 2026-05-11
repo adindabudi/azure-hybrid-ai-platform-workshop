@@ -48,7 +48,7 @@ from langchain.prompts import ChatPromptTemplate
 
 llm = ChatOpenAI(
     model="gpt-5-mini",
-    base_url=os.environ["APIM_URL"] + "/openai/openai/deployments/gpt-5-mini",
+    base_url=os.environ["APIM_URL"] + "/openai/deployments/gpt-5-mini",
     default_headers={"Ocp-Apim-Subscription-Key": os.environ["APIM_KEY"]},
     default_query={"api-version": "2024-10-21"},
 )
@@ -101,7 +101,7 @@ from langchain.prompts import ChatPromptTemplate
 
 llm = ChatOpenAI(
     model="gpt-5-mini",
-    base_url=os.environ["APIM_URL"] + "/openai/openai/deployments/gpt-5-mini",
+    base_url=os.environ["APIM_URL"] + "/openai/deployments/gpt-5-mini",
     default_headers={"Ocp-Apim-Subscription-Key": os.environ["APIM_KEY"]},
     default_query={"api-version": "2024-10-21"},
 )

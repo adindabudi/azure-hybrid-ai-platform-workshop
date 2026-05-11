@@ -51,7 +51,7 @@ have_control_plane() {
   [[ -n "$RG" && -n "$APIM_NAME" ]]
 }
 
-ENDPOINT="${APIM_GATEWAY_URL}/openai/openai/deployments/${MODEL_DEPLOY}/chat/completions?api-version=2024-10-21"
+ENDPOINT="${APIM_GATEWAY_URL}/openai/deployments/${MODEL_DEPLOY}/chat/completions?api-version=2024-10-21"
 
 # --- M1.1 — API resource exists (control plane) ---
 if have_control_plane; then

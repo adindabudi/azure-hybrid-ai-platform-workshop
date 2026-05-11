@@ -57,7 +57,7 @@ Send 10 chat-completion requests through the gateway, mixing `cheap` and
 for i in $(seq 1 10); do
   TIER=$([[ $((RANDOM % 2)) -eq 0 ]] && echo cheap || echo premium)
   curl -sS -o /dev/null \
-    "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+    "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
     -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
     -H "x-auth-mode: anonymous" \
     -H "x-model-tier: ${TIER}" \
@@ -157,7 +157,7 @@ the wrapper and JWT is unconditional.
 ```bash
 # Without a token AND without the anonymous escape → 401
 curl -sS -o /dev/null -w "%{http_code}\n" \
-  "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}"
 # Expected: 401
 ```
@@ -170,7 +170,7 @@ APP_ID="<aad-app-id from facilitator>"
 TOKEN=$(az account get-access-token --resource "$APP_ID" --query accessToken -o tsv)
 
 curl -sS -o /dev/null -w "%{http_code}\n" \
-  "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
@@ -219,7 +219,7 @@ The policy on the workshop gateway looks like this (Path A):
 ```bash
 # Safe prompt → 200
 curl -sS -o /dev/null -w "%{http_code}\n" \
-  "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
   -H "Content-Type: application/json" \
@@ -228,7 +228,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" \
 
 # Jailbreak attempt → 403
 curl -sS -o /dev/null -w "%{http_code}\n" \
-  "${APIM_GATEWAY_URL}/openai/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
   -H "Content-Type: application/json" \

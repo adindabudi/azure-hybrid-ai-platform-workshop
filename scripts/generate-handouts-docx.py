@@ -164,7 +164,7 @@ def write_handout_docx(path: Path, ns: str, ctx: dict) -> None:
     doc.add_paragraph("4. Smoke-test the gateway:")
     p = doc.add_paragraph(style="No Spacing")
     p.add_run(
-        f'    curl -s "${{APIM_GATEWAY_URL}}/openai/openai/deployments/'
+        f'    curl -s "${{APIM_GATEWAY_URL}}/openai/deployments/'
         f'{ctx["GPT_DEPLOY"]}/chat/completions?api-version=2024-10-21" \\\n'
         f'      -H "Ocp-Apim-Subscription-Key: ${{APIM_KEY}}" \\\n'
         f'      -H "Content-Type: application/json" \\\n'
