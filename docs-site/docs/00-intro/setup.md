@@ -474,14 +474,18 @@ on Python 3.13 on May 10 2026.
 python -m venv .venv
 source .venv/bin/activate
 
-pip install \
-  'agent-framework==1.3.*' \
+# 1) Core Agent Framework + LangChain trio + observability extensions.
+#    --pre is needed because microsoft-agents-a365-* and
+#    agent-framework-foundry-local are still in pre-release.
+pip install --pre \
+  'agent-framework>=1.0.0,<2' \
+  'agent-framework-foundry-local' \
   'langchain==1.2.15' \
   'langchain-core==1.2.31' \
   'langchain-openai==1.1.14' \
   'wrapt<2' \
-  --pre microsoft-agents-a365-observability-extensions-langchain \
-  --pre microsoft-agents-a365-observability-extensions-agent-framework \
+  'microsoft-agents-a365-observability-extensions-langchain' \
+  'microsoft-agents-a365-observability-extensions-agent-framework' \
   'azure-monitor-opentelemetry'
 ```
 
@@ -494,14 +498,15 @@ python -m venv .venv
 # in the same session — does not require admin, only affects this PS process:
 #   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
-pip install `
-  'agent-framework==1.3.*' `
+pip install --pre `
+  'agent-framework>=1.0.0,<2' `
+  'agent-framework-foundry-local' `
   'langchain==1.2.15' `
   'langchain-core==1.2.31' `
   'langchain-openai==1.1.14' `
   'wrapt<2' `
-  --pre microsoft-agents-a365-observability-extensions-langchain `
-  --pre microsoft-agents-a365-observability-extensions-agent-framework `
+  'microsoft-agents-a365-observability-extensions-langchain' `
+  'microsoft-agents-a365-observability-extensions-agent-framework' `
   'azure-monitor-opentelemetry'
 ```
 
@@ -515,19 +520,24 @@ The pins above are verified working.
 
 ```python
 import agent_framework
+from agent_framework.openai import OpenAIChatClient   # post-rc6 namespace
 import microsoft_agents_a365.observability.core
 import microsoft_agents_a365.observability.extensions.langchain
 import microsoft_agents_a365.observability.extensions.agentframework
 import langchain
 print("agent_framework", agent_framework.__version__)
 print("langchain", langchain.__version__)
+print("OpenAIChatClient module", OpenAIChatClient.__module__)
 ```
 
-**Expected output**
+**Expected output** — agent_framework version may be `1.0.0rc6+` or any
+`1.x` stable depending on what pip resolves; the import path matters
+more than the exact tag:
 
 ```
-agent_framework 1.3.0
+agent_framework 1.0.0rc6
 langchain 1.2.15
+OpenAIChatClient module agent_framework.openai
 ```
 
 ## Next

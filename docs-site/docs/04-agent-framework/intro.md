@@ -32,19 +32,27 @@ source .venv/bin/activate
 
 python - <<'PY'
 import agent_framework
-from agent_framework import OpenAIChatClient
+from agent_framework.openai import OpenAIChatClient
 
 print("agent_framework", agent_framework.__version__)
 print("OpenAIChatClient module", OpenAIChatClient.__module__)
 PY
 ```
 
-**Expected output**
+**Expected output** (the exact rc tag depends on what M0 pinned):
 
 ```
-agent_framework 1.3.0
-OpenAIChatClient module agent_framework
+agent_framework 1.0.0rc6
+OpenAIChatClient module agent_framework.openai
 ```
+
+:::note 1.0.0rc6 changed where the OpenAI client lives
+Until rc5 you could write `from agent_framework import OpenAIChatClient`.
+From rc6 onwards the OpenAI/Azure-OpenAI clients are in the
+`agent_framework.openai` subpackage (`agent-framework-openai` on PyPI),
+and the old `AzureOpenAIChatClient` from `agent_framework.azure` was
+removed in favor of `OpenAIChatClient` with `azure_endpoint=...`.
+:::
 
 If the import fails, revisit [M0 Step 6](../00-intro/setup.md).
 
@@ -58,7 +66,8 @@ Create `apps/agent-complaint-triage/agent.py`:
 import asyncio
 import os
 
-from agent_framework import Agent, OpenAIChatClient
+# Post-rc6: OpenAI/Azure-OpenAI clients live in agent_framework.openai.
+from agent_framework.openai import OpenAIChatClient
 
 
 def classify_complaint(text: str) -> dict:
@@ -79,7 +88,7 @@ def classify_complaint(text: str) -> dict:
     return {"category": category, "urgency": urgency}
 
 
-def build_agent() -> Agent:
+def build_agent():
     """Configure the chat client + agent.
 
     APIM_URL and APIM_KEY come from the workshop bootstrap. Switching
@@ -92,8 +101,9 @@ def build_agent() -> Agent:
         api_key=os.environ["APIM_KEY"],
     )
 
-    return Agent(
-        client,
+    # `client.create_agent(...)` is the documented convenience
+    # constructor — it returns a fully wired ChatAgent.
+    return client.create_agent(
         name="ComplaintTriage",
         instructions=(
             "You triage customer support requests. "
@@ -110,7 +120,8 @@ async def main():
     response = await agent.run(
         "Halo, kartu ATM saya tertelan di Surabaya tadi malam. Tolong bantu."
     )
-    print(response.output)
+    # AgentRunResponse.text is the assembled assistant text.
+    print(response.text)
 
 
 if __name__ == "__main__":
@@ -202,16 +213,24 @@ python apps/agent-complaint-triage/agent.py
 ### (d) Foundry Local on your laptop
 
 For the no-network-needed path — useful for an architect's laptop demo —
-use [Foundry Local](https://learn.microsoft.com/azure/ai-foundry/foundry-local/).
+use [Foundry Local](https://learn.microsoft.com/agent-framework/agents/providers/foundry-local).
 This requires `agent-framework-foundry-local` (already in M0's pip
-install).
+install, installed with `--pre`).
 
 ```python
+from agent_framework import Agent
 from agent_framework.foundry import FoundryLocalClient
 
-client = FoundryLocalClient(model="phi-4-mini")
-agent = Agent(client, name="ComplaintTriage", instructions=..., tools=[...])
+agent = Agent(
+    client=FoundryLocalClient(model="phi-4-mini"),
+    name="ComplaintTriage",
+    instructions="...",
+    tools=[classify_complaint],
+)
 ```
+
+If you omit `model=`, set the `FOUNDRY_LOCAL_MODEL` env var. The first
+run downloads the model — give it a few minutes.
 
 ### Verify all four runtimes
 
@@ -227,8 +246,11 @@ OpenAI-compatible HTTP endpoint for ad-hoc testing.
 
 ```bash
 # In a separate terminal
-devui apps/ --port 8080 --instrumentation
+devui apps/ --port 8080 --tracing
 ```
+
+(`--tracing` is the documented flag for OTel-backed observability in
+DevUI; older docs called it `--instrumentation`.)
 
 Open [http://localhost:8080](http://localhost:8080). Pick `ComplaintTriage` from the sidebar
 and send a test message. Each tool call is shown as a separate span; the
@@ -250,10 +272,9 @@ import asyncio
 import os
 from pathlib import Path
 
-from agent_framework import (
-    Agent, OpenAIChatClient,
-    WorkflowBuilder, FileCheckpointStorage,
-)
+from agent_framework import FileCheckpointStorage, WorkflowBuilder
+from agent_framework.openai import OpenAIChatClient
+from agent_framework.orchestrations import SequentialBuilder
 
 
 def make_client():
@@ -267,34 +288,45 @@ def make_client():
 
 client = make_client()
 
-triage = Agent(client, name="Triage",
-               instructions="Classify into transactional|account|info|general.")
-specialist = Agent(client, name="Specialist",
-                   instructions="Generate a draft customer reply.")
-compliance = Agent(client, name="Compliance",
-                   instructions=(
-                     "Review the draft for regulatory language. "
-                     "Return APPROVED:<reply> or REJECTED:<reason>."
-                   ))
+triage = client.create_agent(
+    name="Triage",
+    instructions="Classify into transactional|account|info|general.",
+)
+specialist = client.create_agent(
+    name="Specialist",
+    instructions="Generate a draft customer reply.",
+)
+compliance = client.create_agent(
+    name="Compliance",
+    instructions=(
+        "Review the draft for regulatory language. "
+        "Return APPROVED:<reply> or REJECTED:<reason>."
+    ),
+)
 
-workflow = (
+# Cleanest path — three agents in a straight pipeline.
+sequential = SequentialBuilder(
+    participants=[triage, specialist, compliance]
+).build()
+
+# Lower-level path with checkpointing for crash recovery.
+storage = FileCheckpointStorage(Path("./.checkpoints").resolve())
+checkpointed = (
     WorkflowBuilder(start_executor=triage)
-    .add_executor(specialist)
-    .add_executor(compliance)
     .add_edge(triage, specialist)
     .add_edge(specialist, compliance)
-    .with_checkpoint_storage(
-        FileCheckpointStorage(Path("./.checkpoints").resolve())
-    )
+    .with_checkpointing(storage)  # NOTE: with_checkpointing — not with_checkpoint_storage
     .build()
 )
 
 
 async def main():
-    result = await workflow.run(
+    workflow = checkpointed if os.environ.get("WORKFLOW_MODE") == "checkpoint" else sequential
+    events = await workflow.run(
         "Saldo saya tiba-tiba berkurang Rp 500.000 tanpa transaksi yang saya kenal."
     )
-    print(result.output)
+    for output in events.get_outputs():
+        print(output)
 
 
 if __name__ == "__main__":
@@ -305,17 +337,19 @@ Run it:
 
 ```bash
 mkdir -p .checkpoints
-python apps/agent-complaint-triage/workflow.py
+python apps/agent-complaint-triage/workflow.py                  # sequential
+WORKFLOW_MODE=checkpoint python apps/agent-complaint-triage/workflow.py  # crash-resumable
 ```
 
 Watch the DevUI tab — you'll see three sequential agent spans, each with
-its own tool/LLM calls.
+its own tool/LLM calls. With `WORKFLOW_MODE=checkpoint`, kill the process
+mid-run and rerun — it picks up from the last completed step.
 
 :::note .NET parity
 MAF .NET ships
 [`CosmosCheckpointStore`](https://learn.microsoft.com/dotnet/api/microsoft.agents.ai.workflows.checkpointing)
 in the `Microsoft.Agents.AI.Workflows.Checkpointing` namespace — durable
-multi-day workflows backed by Cosmos DB. MAF Python core (1.3.0) ships
+multi-day workflows backed by Cosmos DB. MAF Python core (1.0.0rc6+) ships
 only `InMemoryCheckpointStorage` and `FileCheckpointStorage`. For
 production-grade durability in Python you implement the
 `CheckpointStorage` protocol against Cosmos yourself, or run
@@ -334,18 +368,28 @@ Southeast Asia, East US 2, Sweden Central, and a few other regions
 ([region list](https://learn.microsoft.com/azure/foundry/agents/concepts/hosted-agents#platform-details)).
 
 ```python
-from agent_framework.foundry import FoundryChatClient, FoundryAgent
+from agent_framework import Agent
+from agent_framework.foundry import FoundryAgent, FoundryChatClient
 from azure.identity import DefaultAzureCredential
 
-client = FoundryChatClient(
-    project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-    model="gpt-5-mini",
-    credential=DefaultAzureCredential(),
+# Direct inference path — your code owns instructions + tools.
+direct_agent = Agent(
+    client=FoundryChatClient(
+        project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
+        model="gpt-5-mini",
+        credential=DefaultAzureCredential(),
+    ),
+    name="ComplaintTriage",
+    instructions="You triage customer support requests.",
+    tools=[classify_complaint],
 )
-agent = FoundryAgent(
+
+# Service-managed path — agent definition lives in Foundry portal.
+hosted_agent = FoundryAgent(
     project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
     agent_name="complaint-triage",
-    tools=[classify_complaint],
+    agent_version="1.0",
+    credential=DefaultAzureCredential(),
 )
 ```
 

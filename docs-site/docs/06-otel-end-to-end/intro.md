@@ -50,23 +50,29 @@ The string has the form
 
 ## Step 1 — Instrument the agent
 
-Add the four highlighted lines to the **top** of
+Add the highlighted lines to the **top** of
 `apps/agent-complaint-triage/agent.py`:
 
-```python {1-7}
+```python {1-12}
+from azure.monitor.opentelemetry import configure_azure_monitor
 from microsoft_agents_a365.observability.core import configure
 from microsoft_agents_a365.observability.extensions.agentframework import (
     AgentFrameworkInstrumentor,
 )
 
-configure(service_name="ComplaintTriage",
-          service_namespace="hybrid-ai-workshop")
+configure(
+    service_name="ComplaintTriage",
+    service_namespace="hybrid-ai-workshop",
+)
+# Send the configured spans to App Insights via the Azure Monitor distro.
+# Reads APPLICATIONINSIGHTS_CONNECTION_STRING from the environment.
+configure_azure_monitor()
 AgentFrameworkInstrumentor().instrument()
 
 # ----- everything below is unchanged -----
 import asyncio
 import os
-from agent_framework import Agent, OpenAIChatClient
+from agent_framework.openai import OpenAIChatClient
 ...
 ```
 
@@ -79,7 +85,7 @@ python apps/agent-complaint-triage/agent.py
 Within ~60 seconds, **Application Insights → Transaction search** shows
 a new trace with two spans:
 
-- `Agent.run` (root) — your agent
+- `ChatAgent.run` (root) — your agent
 - `chat.completions.create` (child) — the LLM call with full
   `gen_ai.*` semantic-convention attributes
 
@@ -113,6 +119,7 @@ Update the agent to dual-export. Replace the M6 Step 1 instrumentation
 block with:
 
 ```python
+from azure.monitor.opentelemetry import configure_azure_monitor
 from microsoft_agents_a365.observability.core import configure
 from microsoft_agents_a365.observability.extensions.agentframework import (
     AgentFrameworkInstrumentor,
@@ -123,8 +130,11 @@ from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
     OTLPSpanExporter,
 )
 
-configure(service_name="ComplaintTriage",
-          service_namespace="hybrid-ai-workshop")
+configure(
+    service_name="ComplaintTriage",
+    service_namespace="hybrid-ai-workshop",
+)
+configure_azure_monitor()       # Application Insights export
 
 # Add OTLP export alongside the App Insights exporter.
 trace.get_tracer_provider().add_span_processor(

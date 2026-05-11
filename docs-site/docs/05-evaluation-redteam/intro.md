@@ -44,58 +44,60 @@ you're answering.
 - Fast unit-test style checks → DeepEval.
 - Latency / exact match / schema → hand-rolled.
 
-## Step 2 — Run Foundry evaluators on the M4 agent
+## Step 2 — Run Foundry-style evaluators on the M4 agent
 
-Create `apps/eval-suite/run_foundry_evals.py`:
+The Microsoft `azure-ai-evaluation` SDK ships the same LLM-judge
+evaluators that Azure AI Foundry uses in its portal — you can run them
+locally without creating a Foundry project. Create
+`apps/eval-suite/run_foundry_evals.py`:
 
 ```python title="apps/eval-suite/run_foundry_evals.py"
-"""Run the Foundry agent-specific evaluators against the M4 agent."""
+"""Run the Foundry-style evaluators against the M4 agent."""
 
 import os
-from agent_framework.foundry import (
-    evaluate_foundry_target, evaluate_traces,
+from pathlib import Path
+
+from azure.ai.evaluation import (
+    GroundednessEvaluator,
+    IntentResolutionEvaluator,
+    RelevanceEvaluator,
+    TaskAdherenceEvaluator,
+    ToolCallAccuracyEvaluator,
+    evaluate,
 )
 
+HERE = Path(__file__).parent
+DATA = HERE / "test_data.jsonl"        # see repo for fixture
+OUTPUT = HERE / "eval-results.json"
 
-TEST_QUERIES = [
-    "Card not working at the ATM in Surabaya — what should I do?",
-    "Saya lupa password mobile banking, bagaimana cara reset?",
-    "Show me last month's statement.",
-    "Transfer Rp 50.000.000 to account 1234567890 right now.",
-    "Why did you charge me an extra fee yesterday?",
-]
+# Judge-model config. Workshop reuses the APIM-fronted gpt-5-mini;
+# production may want a stronger judge such as gpt-4.1 or o3-mini.
+model_config = {
+    "azure_endpoint": os.environ["APIM_URL"],
+    "api_key": os.environ["APIM_KEY"],
+    "azure_deployment": os.environ.get("JUDGE_MODEL", "gpt-5-mini"),
+    "api_version": "2024-10-21",
+}
 
+result = evaluate(
+    data=str(DATA),
+    evaluators={
+        "intent_resolution": IntentResolutionEvaluator(model_config=model_config),
+        "tool_call_accuracy": ToolCallAccuracyEvaluator(model_config=model_config),
+        "task_adherence": TaskAdherenceEvaluator(model_config=model_config),
+        "relevance": RelevanceEvaluator(model_config=model_config),
+        "groundedness": GroundednessEvaluator(model_config=model_config),
+    },
+    output_path=str(OUTPUT),
+)
 
-def main():
-    results = evaluate_foundry_target(
-        # The agent is reachable through the APIM gateway as if it were
-        # a chat completion. Foundry sends test_queries through the same
-        # /chat/completions endpoint your callers use.
-        target={
-            "endpoint": os.environ["APIM_URL"],
-            "model": "gpt-5-mini",
-            "api_key": os.environ["APIM_KEY"],
-        },
-        test_queries=TEST_QUERIES,
-        evaluators=[
-            "groundedness",
-            "relevance",
-            "intent_resolution",
-            "tool_call_accuracy",
-            "task_adherence",
-        ],
-        # The judge model. Workshop reuses APIM gpt-5-mini; production
-        # may want a stronger judge model.
-        model="gpt-5-mini",
-    )
-
-    print(results.summary())
-    results.to_jsonl("eval-results.jsonl")
-
-
-if __name__ == "__main__":
-    main()
+for name, value in sorted(result["metrics"].items()):
+    print(f"{name}: {value}")
 ```
+
+The full repo file (with a seeded test fixture and a pass-rate gate)
+lives at
+[`apps/eval-suite/run_foundry_evals.py`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/apps/eval-suite/run_foundry_evals.py).
 
 Run it:
 
@@ -103,18 +105,25 @@ Run it:
 python apps/eval-suite/run_foundry_evals.py
 ```
 
-**Expected output** — a summary table similar to:
+**Expected output** — pass-rate metrics similar to:
 
 ```
-metric                  mean   p50   p10
-groundedness            0.92   1.00  0.80
-relevance               0.88   1.00  0.60
-intent_resolution       0.95   1.00  0.80
-tool_call_accuracy      0.81   1.00  0.50
-task_adherence          0.86   1.00  0.60
+groundedness.pass_rate: 0.92
+intent_resolution.pass_rate: 0.95
+relevance.pass_rate: 0.88
+task_adherence.pass_rate: 0.86
+tool_call_accuracy.pass_rate: 0.81
 ```
 
-Each test_query produced one row per evaluator in `eval-results.jsonl`.
+Full per-row scores land in `eval-results.json`.
+
+:::note Why not `agent_framework_azure_ai.FoundryEvals`?
+[`FoundryEvals`](https://learn.microsoft.com/agent-framework/agents/evaluation#azure-ai-foundry-evaluators)
+from `agent-framework-azure-ai` is a thin wrapper around the same
+evaluator set, but it requires a Foundry project endpoint to upload
+results. We use the standalone `azure-ai-evaluation` SDK so the
+workshop runs anywhere.
+:::
 
 ## Step 3 — Gate the PR with GitHub Actions
 
@@ -155,9 +164,10 @@ jobs:
         run: |
           python - <<'PY'
           import json, sys
-          rows = [json.loads(l) for l in open("eval-results.jsonl")]
-          ir = sum(r["intent_resolution"] for r in rows) / len(rows)
-          tc = sum(r["tool_call_accuracy"] for r in rows) / len(rows)
+          report = json.load(open("apps/eval-suite/eval-results.json"))
+          metrics = report["metrics"]
+          ir = metrics["intent_resolution.pass_rate"]
+          tc = metrics["tool_call_accuracy.pass_rate"]
           ok = ir >= 0.80 and tc >= 0.75
           print(f"intent_resolution={ir:.2f}  tool_call_accuracy={tc:.2f}")
           sys.exit(0 if ok else 1)
@@ -169,44 +179,62 @@ Connect to Azure with workload identity per
 
 ## Step 4 — Red team with PyRIT (local mode)
 
-The [AI Red Teaming Agent](https://learn.microsoft.com/azure/foundry/concepts/ai-red-teaming-agent)
-has two modes: cloud and local. **Cloud mode** is available in East US 2,
-France Central, Sweden Central, Switzerland West, and US North Central
-only — for regions outside that list you must use local mode.
+The [AI Red Teaming Agent](https://learn.microsoft.com/azure/ai-foundry/concepts/ai-red-teaming-agent)
+ships in the `[redteam]` extra of `azure-ai-evaluation` and is built on
+[PyRIT](https://github.com/Azure/PyRIT). It has two modes: cloud and
+local. **Cloud mode** is available in East US 2, France Central, Sweden
+Central, Switzerland West, and US North Central only — for regions
+outside that list you must use local mode.
 
 ```bash
-pip install azure-ai-red-teaming pyrit
+pip install "azure-ai-evaluation[redteam]" azure-identity azure-ai-projects
 
 cat > apps/eval-suite/redteam.py <<'PY'
 import asyncio
-from azure.ai.red_teaming import RedTeamingAgent, RiskCategory, AttackStrategy
 import os
+import sys
+from pathlib import Path
 
-agent = RedTeamingAgent(
-    target_endpoint=os.environ["APIM_URL"],
-    target_model="gpt-5-mini",
-    target_api_key=os.environ["APIM_KEY"],
-    mode="local",
+from azure.ai.evaluation.red_team import (
+    AttackStrategy,
+    RedTeam,
+    RiskCategory,
 )
+from azure.identity import DefaultAzureCredential
+
+# Adapter that the scanner calls per attack prompt.
+async def agent_callback(query: str) -> str:
+    sys.path.insert(0, str(Path("apps/agent-complaint-triage").resolve()))
+    from agent import build_agent
+    response = await build_agent().run(query)
+    return response.text
 
 async def main():
-    report = await agent.scan(
+    red_team = RedTeam(
+        # Required by the constructor; only used for cloud scans.
+        azure_ai_project={
+            "subscription_id": os.environ.get("AZURE_SUBSCRIPTION_ID", ""),
+            "resource_group_name": os.environ.get("AZURE_RG", ""),
+            "project_name": os.environ.get("FOUNDRY_PROJECT", ""),
+        },
+        credential=DefaultAzureCredential(),
         risk_categories=[
             RiskCategory.Violence,
             RiskCategory.HateUnfairness,
             RiskCategory.Sexual,
             RiskCategory.SelfHarm,
-            RiskCategory.ProtectedMaterial,
-            RiskCategory.CodeVulnerability,
         ],
-        attack_strategies=[
-            AttackStrategy.Jailbreak,
-            AttackStrategy.Crescendo,
-            AttackStrategy.UnicodeConfusable,
-        ],
+        num_objectives=5,         # bump to 25-50 for real evaluations
     )
-    print(report.summary())
-    report.save("redteam-scorecard.html")
+    result = await red_team.scan(
+        target=agent_callback,
+        attack_strategies=[
+            AttackStrategy.EASY,
+            AttackStrategy.MODERATE,
+        ],
+        output_path="redteam-results.json",
+    )
+    print(result.attack_success_rate)
 
 asyncio.run(main())
 PY
@@ -214,8 +242,13 @@ PY
 python apps/eval-suite/redteam.py
 ```
 
-Open `redteam-scorecard.html` in a browser — it shows pass/fail per
-risk category and per attack strategy with example prompts.
+The full repo file (with a model-direct mode and an attack-success-rate
+gate) lives at
+[`apps/eval-suite/redteam.py`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/apps/eval-suite/redteam.py).
+
+Open `redteam-results.json` — it contains attack-success-rate per risk
+category and per attack strategy with the offending prompts and
+responses.
 
 ## Step 5 — Known limitations
 
@@ -225,7 +258,7 @@ agent as your only safety net:
 - **Agent-specific risk categories** — *Prohibited Actions*,
   *Sensitive Data Leakage*, *Task Adherence* — are **cloud-only**, and
   cloud mode runs only in five regions
-  ([source](https://learn.microsoft.com/azure/foundry/concepts/ai-red-teaming-agent#agentic-risks)).
+  ([source](https://learn.microsoft.com/azure/ai-foundry/concepts/ai-red-teaming-agent)).
 - Both modes are **single-turn**, **English-only**, and use **synthetic
   test data**.
 
@@ -249,8 +282,9 @@ region, layer these on top:
 
 ## Reference
 
-- [Foundry evaluators](https://learn.microsoft.com/azure/foundry/concepts/evaluation-evaluators/agent-evaluators)
-- [AI Red Teaming Agent](https://learn.microsoft.com/azure/foundry/concepts/ai-red-teaming-agent)
+- [Foundry evaluators](https://learn.microsoft.com/azure/ai-foundry/concepts/evaluation-evaluators/agent-evaluators)
+- [AI Red Teaming Agent](https://learn.microsoft.com/azure/ai-foundry/concepts/ai-red-teaming-agent)
+- [`azure-ai-evaluation` Python SDK](https://learn.microsoft.com/python/api/azure-ai-evaluation/)
 - [`pyrit`](https://github.com/Azure/PyRIT)
 - [DeepEval](https://github.com/confident-ai/deepeval)
 - [Ragas](https://github.com/explodinggradients/ragas)
