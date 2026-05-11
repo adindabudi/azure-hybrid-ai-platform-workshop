@@ -43,17 +43,51 @@ The official APIM-MCP integration is documented at
 
 The repo's [`apps/mcp-customer-tool/`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/tree/main/apps/mcp-customer-tool)
 directory has a Python FastMCP server that exposes a `lookup_customer`
-tool against a synthetic dataset.
+tool against a synthetic dataset. The image is already in the workshop
+ACR — you don't build it.
 
 ```bash
 # Substitute your attendee number if not already set
 export NAMESPACE="${NAMESPACE:-attendee-03}"
 
-kubectl apply -n "$NAMESPACE" \
-  -f apps/mcp-customer-tool/deployment.yaml
+# The deployment manifest references ${ACR_LOGIN_SERVER}, so we need to
+# expand that env var before kubectl sees it (kubectl does NOT do shell
+# expansion). Either ask your facilitator for the value or look it up:
+export ACR_LOGIN_SERVER="$(az acr list -g rg-aigw-workshop \
+  --query "[0].loginServer" -o tsv)"
+echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER"   # e.g. acraigwh8yn.azurecr.io
+
+# envsubst expands ${ACR_LOGIN_SERVER} (and only that, because the
+# manifest doesn't use any other shell vars) before piping to kubectl.
+envsubst '${ACR_LOGIN_SERVER}' < apps/mcp-customer-tool/deployment.yaml \
+  | kubectl apply -n "$NAMESPACE" -f -
 
 kubectl rollout status deployment/mcp-customer-tool -n "$NAMESPACE" --timeout=2m
 ```
+
+:::caution `InvalidImageName` after `kubectl apply`?
+You skipped the `envsubst` step. `kubectl describe pod -n "$NAMESPACE"
+-l app=mcp-customer-tool` will show
+`Failed to pull image "${ACR_LOGIN_SERVER}/mcp-customer-tool:1.0":
+couldn't parse image reference`. Fix:
+
+```bash
+kubectl delete deployment mcp-customer-tool -n "$NAMESPACE"
+# then re-run the envsubst | kubectl apply pipeline above
+```
+:::
+
+:::note Don't have `envsubst`?
+It ships with `gettext` on most distros (`apt install gettext-base` on
+Debian/Ubuntu, `brew install gettext` on macOS). On Windows-native
+PowerShell the equivalent one-liner is:
+
+```powershell
+(Get-Content apps/mcp-customer-tool/deployment.yaml) `
+  -replace '\$\{ACR_LOGIN_SERVER\}', $env:ACR_LOGIN_SERVER `
+  | kubectl apply -n $env:NAMESPACE -f -
+```
+:::
 
 ### Verify the MCP server is reachable inside your namespace
 

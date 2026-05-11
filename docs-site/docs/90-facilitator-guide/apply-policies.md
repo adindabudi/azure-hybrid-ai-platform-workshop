@@ -287,6 +287,38 @@ header. In production you'd remove the `<choose>` wrapper.
 
 ## M3 — MCP (per attendee)
 
+### Build and push the MCP image (once per workshop)
+
+Before any attendee can deploy `apps/mcp-customer-tool/deployment.yaml`,
+the image referenced by it (`${ACR_LOGIN_SERVER}/mcp-customer-tool:1.0`)
+must exist in the workshop ACR. Use `az acr build` so you don't need
+Docker installed locally:
+
+```bash
+ACR_NAME=$(az acr list -g "$RG" --query "[0].name" -o tsv)
+ACR_LOGIN_SERVER=$(az acr list -g "$RG" --query "[0].loginServer" -o tsv)
+echo "Building into $ACR_LOGIN_SERVER ..."
+
+az acr build \
+  --registry "$ACR_NAME" \
+  --image mcp-customer-tool:1.0 \
+  apps/mcp-customer-tool
+
+# Verify
+az acr repository show-tags -n "$ACR_NAME" --repository mcp-customer-tool -o tsv
+# Expected: 1.0
+```
+
+Then make sure each AKS node pool has `AcrPull` on the registry (the
+Terraform in `infra/` already does this — re-run `terraform apply` if
+the role assignment is missing).
+
+Tell attendees in their handout what `ACR_LOGIN_SERVER` is, or the
+`az acr list` snippet in [M3 Step 1](../mcp-secure-tool-access/intro)
+will discover it automatically.
+
+### Register MCP backends behind APIM
+
 Attendees deploy their own MCP server in their namespace — see
 [M3](../mcp-secure-tool-access/intro) Step 1, which only needs namespace
 RBAC. Registering the MCP backend behind APIM is admin work; do it
