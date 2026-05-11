@@ -46,7 +46,7 @@ agent_framework 1.3.0
 OpenAIChatClient module agent_framework
 ```
 
-If the import fails, revisit [M0 Step 5](../intro/setup).
+If the import fails, revisit [M0 Step 6](../00-intro/setup.md).
 
 ## Step 2 — Your first MAF agent
 

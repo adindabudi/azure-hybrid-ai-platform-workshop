@@ -38,7 +38,19 @@ If anything is missing, install:
 [Python 3.13](https://www.python.org/downloads/),
 [Node 20](https://nodejs.org/).
 
-## Step 1 — Sign in to Azure
+## Step 1 — Clone the workshop repo
+
+Every subsequent module references files in this repo
+(`scripts/verify-policies.sh`, `apps/agent-complaint-triage/agent.py`,
+`apps/mcp-customer-tool/deployment.yaml`, etc). Clone it once and
+`cd` in — all later commands assume your shell is at the repo root.
+
+```bash
+git clone https://github.com/adindabudi/azure-hybrid-ai-platform-workshop.git
+cd azure-hybrid-ai-platform-workshop
+```
+
+## Step 2 — Sign in to Azure
 
 ```bash
 az login
@@ -50,7 +62,7 @@ The subscription ID comes from your facilitator. You only need
 **read** access at the workshop subscription scope — the facilitator
 has already provisioned everything.
 
-## Step 2 — Read your handout
+## Step 3 — Read your handout
 
 Your facilitator hands you a printed slip with values like:
 
@@ -82,7 +94,7 @@ export NAMESPACE="attendee-03"
 paste it into Slack, email, or screenshots; do not commit it to git.
 :::
 
-## Step 3 — Connect to the shared AKS cluster
+## Step 4 — Connect to the shared AKS cluster
 
 ```bash
 RG=rg-aigw-workshop          # from your handout
@@ -102,7 +114,7 @@ You should see `agent-sa`, `azure-kv-shared`, and `apim-credentials`. If
 any are missing, flag your facilitator — they haven't run the attendee
 bootstrap yet.
 
-## Step 4 — Send your first gateway request
+## Step 5 — Send your first gateway request
 
 This is the moment of truth: a request from your laptop → APIM in
 Indonesia Central → Azure OpenAI in Southeast Asia → back to your laptop.
@@ -149,7 +161,7 @@ You should see your own request, tagged with your `Subscription ID`. If
 you don't have reader access, ask your facilitator for a screenshot
 during the workshop — it'll come up again in M2.
 
-## Step 5 — Install the Python stack
+## Step 6 — Install the Python stack
 
 Every subsequent module uses the same pinned set of packages. Smoke-tested
 on Python 3.13 on May 10 2026.

@@ -107,7 +107,7 @@ Source: [APIM region availability](https://learn.microsoft.com/azure/api-managem
 
 The facilitator runs the
 [`smoke-test`](../90-facilitator-guide/provision.md) script the morning
-of the workshop. If you completed M0.1 Step 4 and got a response back
+of the workshop. If you completed M0.1 Step 5 and got a response back
 from the gateway, the landing zone is up — proceed to M1.
 
 If your curl returned a non-2xx, flag your facilitator before continuing.
