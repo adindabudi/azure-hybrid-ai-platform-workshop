@@ -172,7 +172,8 @@ parent transaction with `service.name=ComplaintTriage` joined by
 
 ## Step 4 — KQL: per-tool p95 latency
 
-A useful dashboard query for the platform team:
+A useful dashboard query for the platform team. Run it in
+**Application Insights** → **Monitoring** → **Logs** (Azure portal):
 
 ```kusto
 dependencies

@@ -380,7 +380,23 @@ The sky is blue because of Rayleigh scattering.
 
 If your facilitator gave you `APP_INSIGHTS_CONN_STRING` and granted you
 **Log Analytics Reader** on the workspace, you can also query your
-request:
+request.
+
+:::info Where do I run these `kusto` blocks?
+KQL queries run in the **Azure portal**, *not* in your terminal
+([MS Learn](https://learn.microsoft.com/azure/azure-monitor/logs/get-started-queries)).
+
+1. Open the [Azure portal](https://portal.azure.com).
+2. Navigate to your Application Insights resource (in `rg-aigw-workshop`
+   — your facilitator can give you the exact name, or click the
+   `APP_INSIGHTS_CONN_STRING` URL from your handout).
+3. In the left menu, under **Monitoring**, click **Logs**.
+4. Paste the KQL block into the **New Query** tab and click **Run**
+   (or press **Shift+Enter**).
+
+The same flow applies to **every** ```` ```kusto ```` block in the rest of
+this workshop. Bookmark this Logs blade — you'll come back many times.
+:::
 
 ```kusto
 customMetrics

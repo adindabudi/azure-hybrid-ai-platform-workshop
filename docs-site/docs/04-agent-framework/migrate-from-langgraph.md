@@ -201,7 +201,8 @@ python apps/migration-langgraph-to-maf/after.py     # LangChain
 python apps/agent-complaint-triage/agent.py         # MAF
 ```
 
-In Application Insights:
+In **Application Insights** (Azure portal → your AI resource →
+**Monitoring** → **Logs**), run:
 
 ```kusto
 traces

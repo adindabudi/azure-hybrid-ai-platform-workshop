@@ -66,8 +66,16 @@ for i in $(seq 1 10); do
 done
 ```
 
-Wait ~60 seconds for metrics to flow, then in **Application Insights →
-Logs**, run:
+Wait ~60 seconds for metrics to flow, then run the query below.
+
+:::info Reminder — where to run `kusto` blocks
+In the **Azure portal**, open your Application Insights resource
+(in `rg-aigw-workshop`) → left menu **Monitoring** → **Logs** →
+paste into the **New Query** tab → press **Shift+Enter** or click
+**Run** ([MS Learn](https://learn.microsoft.com/azure/azure-monitor/logs/get-started-queries)).
+Every `kusto` block in this module assumes you're inside that Logs
+blade — they don't run in your terminal.
+:::
 
 ```kusto
 customMetrics
