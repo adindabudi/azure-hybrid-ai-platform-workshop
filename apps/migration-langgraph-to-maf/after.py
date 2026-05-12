@@ -39,10 +39,11 @@ from microsoft_agents_a365.observability.extensions.langchain import (
 
 
 # Step 1 — Configure observability once at process start. Reads
-# OTEL_EXPORTER_OTLP_ENDPOINT and friends from env.
+# OTEL_EXPORTER_OTLP_ENDPOINT and friends from env. Namespace matches
+# `agent-complaint-triage/agent.py` so M4.1 Step 4's KQL can A/B both.
 configure(
     service_name="complaint-triage-langchain",
-    service_namespace="ai.workshop",
+    service_namespace="hybrid-ai-workshop",
 )
 
 # Step 2 — Enable LangChain auto-instrumentation.

@@ -33,56 +33,69 @@ gateway-grade observability for free.
 
 ```bash
 export APPLICATIONINSIGHTS_CONNECTION_STRING="$APP_INSIGHTS_CONN_STRING"
+export APIM_URL="$APIM_GATEWAY_URL"
+export MODEL_NAME=gpt-5-mini
+# APIM_KEY already exported from M0.
 ```
 
-## Step 1 — A LangChain chain you might already have
+## Step 1 — A LangChain agent you might already have
 
-Create `apps/migration-langgraph-to-maf/before.py`:
+The "before" state is a LangChain `AgentExecutor` with **hand-rolled
+OpenTelemetry**: one tracer, one span per tool call, one outer span
+around the agent invocation. The file lives at
+[`apps/migration-langgraph-to-maf/before.py`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/apps/migration-langgraph-to-maf/before.py)
+and looks like this (excerpt):
 
-```python title="apps/migration-langgraph-to-maf/before.py"
-"""Pre-migration: an unmodified LangChain chain."""
+```python title="apps/migration-langgraph-to-maf/before.py (excerpt)"
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 
-import os
-from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-
-llm = ChatOpenAI(
-    model="gpt-5-mini",
-    base_url=os.environ["APIM_URL"] + "/openai/deployments/gpt-5-mini",
-    default_headers={"Ocp-Apim-Subscription-Key": os.environ["APIM_KEY"]},
-    default_query={"api-version": "2024-10-21"},
+trace.set_tracer_provider(TracerProvider())
+trace.get_tracer_provider().add_span_processor(
+    BatchSpanProcessor(ConsoleSpanExporter())
 )
+tracer = trace.get_tracer("complaint-triage-langchain-before")
 
-chain = (
-    ChatPromptTemplate.from_template(
-        "Triage this customer complaint in one short sentence: {complaint}"
-    )
-    | llm
-)
 
-if __name__ == "__main__":
-    out = chain.invoke({"complaint": "Card not working at ATM in Surabaya"})
-    print(out.content)
+@tool
+def classify_complaint(text: str) -> dict:
+    # Manual span for every tool call — boilerplate that grows linearly
+    # with the number of tools you add.
+    with tracer.start_as_current_span("tool.classify_complaint") as span:
+        span.set_attribute("input.length", len(text))
+        ...
+
+
+async def main() -> None:
+    agent = build_agent()
+    # Manual outer span around the agent invocation.
+    with tracer.start_as_current_span("agent.run") as span:
+        span.set_attribute("genai.system", "azure_openai_via_apim")
+        span.set_attribute("genai.request.model", os.environ["MODEL_NAME"])
+        result = await agent.ainvoke({"input": "..."})
 ```
 
 Run it:
 
 ```bash
-export APIM_URL="$APIM_GATEWAY_URL"     # both from your M0 handout
-# APIM_KEY is already exported
-
 python apps/migration-langgraph-to-maf/before.py
 ```
 
-You'll see a one-line response, but **no spans appear** in Application
-Insights. The gateway sees the request (M2's token-metric policy
-records it), but the chain itself is invisible.
+You'll see the response, plus the manual spans printed to the console by
+`ConsoleSpanExporter`. The pain points: every new tool needs another
+`with tracer.start_as_current_span(...)` block, and the attribute names
+(`genai.system`, `genai.request.model`) are whatever your team decided
+— there's no shared schema with Foundry or App Insights.
 
-## Step 2 — Add three lines of instrumentation
+## Step 2 — Three lines, full GenAI semantic-convention spans
 
-Copy the file to `after.py` and add the three highlighted lines:
+Compare against
+[`apps/migration-langgraph-to-maf/after.py`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/apps/migration-langgraph-to-maf/after.py).
+The manual OTel boilerplate (provider, exporter, every per-tool span)
+is replaced with three lines from the Microsoft Agents 365 extension:
 
-```python title="apps/migration-langgraph-to-maf/after.py" {1-9}
+```python title="apps/migration-langgraph-to-maf/after.py (excerpt)"
 from microsoft_agents_a365.observability.core import configure
 from microsoft_agents_a365.observability.extensions.langchain import (
     CustomLangChainInstrumentor,
@@ -94,28 +107,12 @@ configure(
 )
 CustomLangChainInstrumentor().instrument()
 
-# ----- everything below is unchanged from before.py -----
-import os
-from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
 
-llm = ChatOpenAI(
-    model="gpt-5-mini",
-    base_url=os.environ["APIM_URL"] + "/openai/deployments/gpt-5-mini",
-    default_headers={"Ocp-Apim-Subscription-Key": os.environ["APIM_KEY"]},
-    default_query={"api-version": "2024-10-21"},
-)
-
-chain = (
-    ChatPromptTemplate.from_template(
-        "Triage this customer complaint in one short sentence: {complaint}"
-    )
-    | llm
-)
-
-if __name__ == "__main__":
-    out = chain.invoke({"complaint": "Card not working at ATM in Surabaya"})
-    print(out.content)
+@tool
+def classify_complaint(text: str) -> dict:
+    # No manual span — the instrumentor wraps every @tool automatically
+    # and emits OTel GenAI semantic-convention attributes.
+    ...
 ```
 
 Run it:
@@ -130,9 +127,9 @@ python apps/migration-langgraph-to-maf/after.py
 - Within ~60 seconds, **Application Insights → Transaction search** has
   a new trace with `service.name=complaint-triage-langchain` and three
   spans:
-  - `RunnableSequence` (root)
-  - `PromptTemplate` (child)
+  - `AgentExecutor.ainvoke` (root)
   - `ChatOpenAI` (child with `gen_ai.*` attributes)
+  - `tool.classify_complaint` (child, auto-wrapped)
 
 :::note Console exporter fallback
 If you don't set `APPLICATIONINSIGHTS_CONNECTION_STRING`, A365's
