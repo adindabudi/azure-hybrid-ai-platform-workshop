@@ -24,7 +24,20 @@ AOAI_ENDPOINT=$(terraform output -raw aoai_endpoint)
 APIM_GATEWAY=$(terraform output -raw apim_gateway_url)
 
 KV_NAME=$(echo "$KV_URI" | sed -E 's|https://([^.]+)\..*|\1|')
+# Derive AOAI account name from its endpoint (https://<name>.openai.azure.com/).
+AOAI_NAME=$(echo "$AOAI_ENDPOINT" | sed -E 's|https?://([^.]+)\..*|\1|')
 TENANT_ID=$(az account show --query tenantId -o tsv)
+
+# AOAI key1 — needed for the LiteLLM standalone demo in M4 Step 4(c). This is
+# the only path in the workshop where a raw API key (not the APIM subscription
+# key) is provisioned, because LiteLLM proxies directly to AOAI rather than
+# through APIM. Soft-fail when key listing is disabled on the AOAI account
+# (`disableLocalAuth=true`) — LiteLLM demo will be skipped for that workshop.
+AOAI_KEY=$(az cognitiveservices account keys list -g "$RG" -n "$AOAI_NAME" \
+  --query key1 -o tsv 2>/dev/null || echo "")
+if [[ -z "$AOAI_KEY" ]]; then
+  echo "    !! AOAI key1 unavailable (local auth disabled?) — LiteLLM Step 4(c) demo will skip in attendee namespaces"
+fi
 
 echo "==> Fetching AKS credentials..."
 az aks get-credentials -g "$RG" -n "$AKS" --overwrite-existing >/dev/null
@@ -156,7 +169,21 @@ YAML
     --from-literal=subscription-key="${APIM_KEY:-not-fetched}" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
-  echo "    namespace=$NS  uami=${UAMI_CLIENT_ID:0:8}...  kv=${KV_NAME}  apim=ok"
+  # LiteLLM demo creds — used by `apps/litellm-comparison/deployment.yaml`
+  # in M4 Step 4(c). Per-attendee master-key keeps tenants isolated even
+  # though they share the underlying AOAI key.
+  if [[ -n "$AOAI_KEY" ]]; then
+    LITELLM_MASTER_KEY="sk-${NS}-$(openssl rand -hex 12 2>/dev/null \
+      || head -c 24 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 24)"
+    kubectl create secret generic litellm-creds \
+      --namespace "$NS" \
+      --from-literal=master-key="$LITELLM_MASTER_KEY" \
+      --from-literal=azure-api-base="$AOAI_ENDPOINT" \
+      --from-literal=azure-api-key="$AOAI_KEY" \
+      --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  fi
+
+  echo "    namespace=$NS  uami=${UAMI_CLIENT_ID:0:8}...  kv=${KV_NAME}  apim=ok  litellm=${AOAI_KEY:+ok}${AOAI_KEY:-skipped}"
 done
 
 echo ""

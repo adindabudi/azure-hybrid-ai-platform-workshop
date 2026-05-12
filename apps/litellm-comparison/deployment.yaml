@@ -1,16 +1,20 @@
 # LiteLLM standalone deployment — M4 Step 4(c).
 #
-# Three things go in here:
+# Two things in here:
 #   1. ConfigMap holding litellm/config.yaml (model routing).
-#   2. Secret with the master API key + AOAI credentials.
-#   3. Deployment + ClusterIP Service exposing port 4000.
+#   2. Deployment + ClusterIP Service exposing port 4000.
+#
+# The Secret `litellm-creds` (master-key + AOAI base/key) is created
+# OUT OF BAND by the facilitator's `scripts/bootstrap-attendees.sh`
+# so attendee `kubectl apply` doesn't overwrite real credentials with
+# placeholders. Verify before applying this manifest:
+#
+#   kubectl get secret litellm-creds -n "$NS"      # must exist
+#
+# If missing, ask your facilitator to re-run `bootstrap-attendees.sh`.
 #
 # Apply with:
 #   kubectl apply -n "$NS" -f apps/litellm-comparison/deployment.yaml
-#
-# The Secret carries placeholder values — the facilitator bootstrap
-# script (`scripts/bootstrap-attendees.sh`) overwrites them per
-# attendee namespace before applying.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -31,17 +35,6 @@ data:
       request_timeout: 60
     general_settings:
       master_key: os.environ/LITELLM_MASTER_KEY
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: litellm-creds
-type: Opaque
-stringData:
-  # Replaced by scripts/bootstrap-attendees.sh per attendee.
-  master-key: "sk-REPLACE_ME"
-  azure-api-base: "https://aoai-aigw-sea-xxx.openai.azure.com"
-  azure-api-key: "REPLACE_ME"
 ---
 apiVersion: apps/v1
 kind: Deployment
