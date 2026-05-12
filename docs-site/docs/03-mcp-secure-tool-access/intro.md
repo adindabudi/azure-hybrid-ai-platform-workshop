@@ -91,6 +91,8 @@ PowerShell the equivalent one-liner is:
 
 ### Verify the MCP server is reachable inside your namespace
 
+**Track A / B (bash):**
+
 ```bash
 # Port-forward for a quick test from your laptop
 kubectl port-forward -n "$NAMESPACE" svc/mcp-customer-tool 8765:8765 &
@@ -100,7 +102,19 @@ PF_PID=$!
 curl -sS http://localhost:8765/sse | head -3
 # Expected: server emits an SSE stream — Ctrl-C to stop
 
-kill $PF_PID
+kill "$PF_PID" 2>/dev/null
+```
+
+**Track C (PowerShell)** — `$!` doesn't exist in PowerShell, so use
+`Start-Job`:
+
+```powershell
+$pf = Start-Job -ScriptBlock {
+  kubectl port-forward -n $using:env:NAMESPACE svc/mcp-customer-tool 8765:8765
+}
+Start-Sleep -Seconds 2     # let the forward establish
+curl.exe -sS http://localhost:8765/sse | Select-Object -First 3
+Stop-Job  $pf -PassThru | Remove-Job
 ```
 
 ## Step 2 — Hit your MCP server through APIM

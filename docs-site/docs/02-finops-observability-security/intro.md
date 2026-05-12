@@ -224,6 +224,18 @@ The policy on the workshop gateway looks like this (Path A):
 - `threshold="4"` — block on **severity 4 and above** (0 = safe, 7 =
   most severe). Tune per use-case.
 
+:::caution Content Safety is opt-in for this workshop
+The default landing zone **skips** the Content Safety resource because
+many Internal / MCAP / trial subscriptions don't have the entitlement
+(see [`infra/modules/aoai-singapore/main.tf`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/infra/modules/aoai-singapore/main.tf)).
+If your facilitator did **not** run `apply-apim-policies.sh
+--with-content-safety` (or did not provision the container path), the
+`backend-id="content-safety-sea"` reference resolves to a non-existent
+backend — the `llm-content-safety` block fails open and the jailbreak
+verify in Step 4 returns **200**, not 403. Ask your facilitator which
+path is enabled before declaring the test failed.
+:::
+
 ### Verify
 
 ```bash

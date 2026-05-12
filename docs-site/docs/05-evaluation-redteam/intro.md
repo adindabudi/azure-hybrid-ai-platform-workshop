@@ -48,10 +48,11 @@ you're answering.
 
 The Microsoft `azure-ai-evaluation` SDK ships the same LLM-judge
 evaluators that Azure AI Foundry uses in its portal — you can run them
-locally without creating a Foundry project. Create
-`apps/eval-suite/run_foundry_evals.py`:
+locally without creating a Foundry project. The workshop file lives at
+[`apps/eval-suite/run_foundry_evals.py`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/apps/eval-suite/run_foundry_evals.py)
+and is already in your M0 clone. The shape:
 
-```python title="apps/eval-suite/run_foundry_evals.py"
+```python title="apps/eval-suite/run_foundry_evals.py (excerpt)"
 """Run the Foundry-style evaluators against the M4 agent."""
 
 import os
@@ -95,9 +96,9 @@ for name, value in sorted(result["metrics"].items()):
     print(f"{name}: {value}")
 ```
 
-The full repo file (with a seeded test fixture and a pass-rate gate)
-lives at
-[`apps/eval-suite/run_foundry_evals.py`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/apps/eval-suite/run_foundry_evals.py).
+The repo file additionally seeds a tiny three-row JSONL fixture and
+enforces an `EVAL_PASS_THRESHOLD` gate (default 0.7) — useful when this
+is run from CI.
 
 Run it:
 
@@ -186,15 +187,12 @@ local. **Cloud mode** is available in East US 2, France Central, Sweden
 Central, Switzerland West, and US North Central only — for regions
 outside that list you must use local mode.
 
-```bash
-pip install "azure-ai-evaluation[redteam]" azure-identity azure-ai-projects
+The workshop file
+[`apps/eval-suite/redteam.py`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/apps/eval-suite/redteam.py)
+ships **two run modes** (callback against the M4 agent, or model-direct
+against APIM) and an attack-success-rate gate. The skeleton:
 
-cat > apps/eval-suite/redteam.py <<'PY'
-import asyncio
-import os
-import sys
-from pathlib import Path
-
+```python title="apps/eval-suite/redteam.py (excerpt)"
 from azure.ai.evaluation.red_team import (
     AttackStrategy,
     RedTeam,
@@ -202,49 +200,46 @@ from azure.ai.evaluation.red_team import (
 )
 from azure.identity import DefaultAzureCredential
 
-# Adapter that the scanner calls per attack prompt.
+
 async def agent_callback(query: str) -> str:
-    sys.path.insert(0, str(Path("apps/agent-complaint-triage").resolve()))
-    from agent import build_agent
+    """Adapter the scanner calls per attack prompt."""
+    from agent import build_agent  # apps/agent-complaint-triage/agent.py
     response = await build_agent().run(query)
     return response.text
 
+
 async def main():
     red_team = RedTeam(
-        # Required by the constructor; only used for cloud scans.
-        azure_ai_project={
-            "subscription_id": os.environ.get("AZURE_SUBSCRIPTION_ID", ""),
-            "resource_group_name": os.environ.get("AZURE_RG", ""),
-            "project_name": os.environ.get("FOUNDRY_PROJECT", ""),
-        },
+        # azure_ai_project is required by the constructor; only used for
+        # cloud scans. Leaving subscription_id="" keeps us in local mode.
+        azure_ai_project={"subscription_id": "", "resource_group_name": "", "project_name": ""},
         credential=DefaultAzureCredential(),
         risk_categories=[
             RiskCategory.Violence,
             RiskCategory.HateUnfairness,
-            RiskCategory.Sexual,
             RiskCategory.SelfHarm,
+            RiskCategory.Sexual,
         ],
-        num_objectives=5,         # bump to 25-50 for real evaluations
+        num_objectives=int(os.environ.get("REDTEAM_OBJECTIVES", "5")),
     )
-    result = await red_team.scan(
+    await red_team.scan(
         target=agent_callback,
-        attack_strategies=[
-            AttackStrategy.EASY,
-            AttackStrategy.MODERATE,
-        ],
+        attack_strategies=[AttackStrategy.EASY, AttackStrategy.MODERATE],
         output_path="redteam-results.json",
     )
-    print(result.attack_success_rate)
+```
 
-asyncio.run(main())
-PY
+Run it (install the `[redteam]` extra once if you haven't already):
+
+```bash
+pip install "azure-ai-evaluation[redteam]" azure-identity azure-ai-projects
 
 python apps/eval-suite/redteam.py
 ```
 
-The full repo file (with a model-direct mode and an attack-success-rate
-gate) lives at
-[`apps/eval-suite/redteam.py`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/apps/eval-suite/redteam.py).
+Set `REDTEAM_MODE=model` to scan the underlying model directly (raw
+model safety without the agent guardrails). `REDTEAM_ASR_CEILING`
+controls the pass/fail gate — default 10%.
 
 Open `redteam-results.json` — it contains attack-success-rate per risk
 category and per attack strategy with the offending prompts and

@@ -33,7 +33,6 @@ EMB_DEPLOY=$(terraform output -raw aoai_embedding_deployment)
 COSMOS=$(terraform output -raw cosmos_endpoint)
 SEARCH=$(terraform output -raw search_endpoint)
 APPI_CONN=$(terraform output -raw application_insights_connection_string)
-
 APIM_KEY=$(az apim subscription show \
   --resource-group "$RG" --service-name "$APIM" \
   --sid "${NS}" --query primaryKey -o tsv 2>/dev/null \
@@ -81,8 +80,8 @@ cat <<HANDOUT
   Key Vault                : ${KV_URI}
 
 == Observability ==
-  App Insights conn string : (sensitive — pull at runtime)
-    \$ terraform output -raw application_insights_connection_string
+  App Insights conn string : ${APPI_CONN}
+    (sensitive — treat like an API key; needed for M4.1 + M6)
 
 == APIM curl smoke-test ==
   curl -s "${APIM_GATEWAY}/openai/deployments/${GPT_DEPLOY}/chat/completions?api-version=2024-10-21" \\
