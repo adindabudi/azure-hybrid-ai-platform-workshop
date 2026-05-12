@@ -170,7 +170,7 @@ KEY_VAULT_URI    https://...
 APP_INSIGHTS_CONN_STRING InstrumentationKey=...
 ```
 
-Export the two values every lab needs.
+Export the three values every lab needs.
 
 **Track A / B (bash):**
 
@@ -474,11 +474,16 @@ on Python 3.13 on May 10 2026.
 python -m venv .venv
 source .venv/bin/activate
 
-# 1) Core Agent Framework + LangChain trio + observability extensions.
+# 1) Core Agent Framework + Foundry connectors + LangChain trio +
+#    observability extensions.
 #    --pre is needed because microsoft-agents-a365-* and
 #    agent-framework-foundry-local are still in pre-release.
+#
+#    agent-framework-foundry  → cloud Foundry: FoundryChatClient / FoundryAgent (used in M4 Step 7)
+#    agent-framework-foundry-local → on-laptop runtime: FoundryLocalClient (M4 Step 4d)
 pip install --pre \
   'agent-framework>=1.0.0,<2' \
+  'agent-framework-foundry' \
   'agent-framework-foundry-local' \
   'langchain==1.2.15' \
   'langchain-core==1.2.31' \
@@ -500,6 +505,7 @@ python -m venv .venv
 
 pip install --pre `
   'agent-framework>=1.0.0,<2' `
+  'agent-framework-foundry' `
   'agent-framework-foundry-local' `
   'langchain==1.2.15' `
   'langchain-core==1.2.31' `
@@ -519,23 +525,24 @@ The pins above are verified working.
 ## Verify the install
 
 ```python
+from importlib.metadata import version
 import agent_framework
 from agent_framework.openai import OpenAIChatClient   # post-rc6 namespace
 import microsoft_agents_a365.observability.core
 import microsoft_agents_a365.observability.extensions.langchain
 import microsoft_agents_a365.observability.extensions.agentframework
 import langchain
-print("agent_framework", agent_framework.__version__)
+print("agent-framework", version("agent-framework"))
 print("langchain", langchain.__version__)
 print("OpenAIChatClient module", OpenAIChatClient.__module__)
 ```
 
-**Expected output** — agent_framework version may be `1.0.0rc6+` or any
-`1.x` stable depending on what pip resolves; the import path matters
-more than the exact tag:
+**Expected output** — `agent-framework` may resolve to `1.0.0rc6+` or
+any `1.x` stable depending on what pip picked; the **import path** is
+what matters most for the rest of the workshop:
 
 ```
-agent_framework 1.0.0rc6
+agent-framework 1.0.0rc6
 langchain 1.2.15
 OpenAIChatClient module agent_framework.openai
 ```
