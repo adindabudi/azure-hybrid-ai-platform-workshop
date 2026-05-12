@@ -31,10 +31,10 @@ In this 75-minute module you will:
 source .venv/bin/activate
 
 python - <<'PY'
-import agent_framework
+from importlib.metadata import version
 from agent_framework.openai import OpenAIChatClient
 
-print("agent_framework", agent_framework.__version__)
+print("agent-framework", version("agent-framework"))
 print("OpenAIChatClient module", OpenAIChatClient.__module__)
 PY
 ```
@@ -42,7 +42,7 @@ PY
 **Expected output** (the exact rc tag depends on what M0 pinned):
 
 ```
-agent_framework 1.0.0rc6
+agent-framework 1.0.0rc6
 OpenAIChatClient module agent_framework.openai
 ```
 
@@ -56,11 +56,12 @@ removed in favor of `OpenAIChatClient` with `azure_endpoint=...`.
 
 If the import fails, revisit [M0 Step 6](../00-intro/setup.md).
 
-## Step 2 — Your first MAF agent
+## Step 2 — Walk through the agent
 
-Create `apps/agent-complaint-triage/agent.py`:
+Open [`apps/agent-complaint-triage/agent.py`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/apps/agent-complaint-triage/agent.py)
+— the file is already in the repo from your M0 clone. The shape:
 
-```python title="apps/agent-complaint-triage/agent.py"
+```python title="apps/agent-complaint-triage/agent.py (excerpt)"
 """Triage agent — classifies and routes customer support requests."""
 
 import asyncio
@@ -77,11 +78,11 @@ def classify_complaint(text: str) -> dict:
     CRM or ticketing system.
     """
     text_l = text.lower()
-    if any(k in text_l for k in ("card", "atm", "transfer")):
+    if any(k in text_l for k in ("card", "atm", "transfer", "kartu")):
         category, urgency = "transactional", "high"
-    elif any(k in text_l for k in ("password", "login", "otp")):
+    elif any(k in text_l for k in ("password", "login", "otp", "lupa")):
         category, urgency = "account-access", "high"
-    elif any(k in text_l for k in ("statement", "balance", "history")):
+    elif any(k in text_l for k in ("statement", "balance", "history", "saldo")):
         category, urgency = "informational", "low"
     else:
         category, urgency = "general", "medium"
@@ -89,20 +90,17 @@ def classify_complaint(text: str) -> dict:
 
 
 def build_agent():
-    """Configure the chat client + agent.
-
-    APIM_URL and APIM_KEY come from the workshop bootstrap. Switching
-    backends means changing only these two env vars — see Step 4.
-    """
     client = OpenAIChatClient(
         model=os.environ["MODEL_NAME"],
         azure_endpoint=os.environ["APIM_URL"],
         api_version="2024-10-21",
         api_key=os.environ["APIM_KEY"],
+        # MODEL_TIER drives APIM's header-based routing (M1.2 Step 3).
+        default_headers={"x-model-tier": os.environ.get("MODEL_TIER", "premium")},
     )
 
-    # `client.create_agent(...)` is the documented convenience
-    # constructor — it returns a fully wired ChatAgent.
+    # `client.create_agent(...)` is the convenience method that returns
+    # a configured ChatAgent.
     return client.create_agent(
         name="ComplaintTriage",
         instructions=(
@@ -113,20 +111,19 @@ def build_agent():
         ),
         tools=[classify_complaint],
     )
-
-
-async def main():
-    agent = build_agent()
-    response = await agent.run(
-        "Halo, kartu ATM saya tertelan di Surabaya tadi malam. Tolong bantu."
-    )
-    # AgentRunResponse.text is the assembled assistant text.
-    print(response.text)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
 ```
+
+Three things to notice:
+
+1. **Single client class** — `OpenAIChatClient` is the same class used for
+   all four backends in Step 4 below. No `AzureOpenAIChatClient` /
+   `LiteLLMChatClient` adapters.
+2. **Tool = plain function** — `classify_complaint` is a normal Python
+   function. The agent framework picks up its type hints and docstring
+   to build the tool schema.
+3. **`default_headers`** — sets `x-model-tier` so the workshop APIM
+   policy can route between AOAI and the self-hosted SLM without any
+   change to the agent code.
 
 ## Step 3 — Run it against the gateway
 
@@ -166,20 +163,9 @@ python apps/agent-complaint-triage/agent.py
 
 ### (b) APIM-fronted self-hosted Phi-4-mini
 
-Set the model-tier header so APIM routes to the SLM backend. Change
-`agent.py` to add the header to the client. Easiest: use `default_headers`:
-
-```python
-client = OpenAIChatClient(
-    model=os.environ["MODEL_NAME"],
-    azure_endpoint=os.environ["APIM_URL"],
-    api_version="2024-10-21",
-    api_key=os.environ["APIM_KEY"],
-    default_headers={"x-model-tier": os.environ.get("MODEL_TIER", "premium")},
-)
-```
-
-Then:
+The agent code is already wired with `default_headers={"x-model-tier":
+...}`, so switching backends is purely env-var work — the agent.py
+binary you ran in (a) needs no code changes:
 
 ```bash
 export MODEL_TIER=cheap
@@ -188,7 +174,8 @@ python apps/agent-complaint-triage/agent.py
 ```
 
 The model output may be less polished — Phi-4-mini is a 3.8B-parameter
-model — but the tool calling works identically.
+model — but tool calling works identically. Set `MODEL_TIER=premium`
+(or unset it) to switch back to AOAI.
 
 ### (c) LiteLLM standalone
 
@@ -197,7 +184,15 @@ Deploy LiteLLM as a sidecar OAI-compatible proxy in your namespace
 [upstream](https://github.com/BerriAI/litellm)):
 
 ```bash
+# Sanity-check: the secret with master-key + AOAI creds must already
+# exist — facilitator seeds it via scripts/bootstrap-attendees.sh.
+kubectl get secret litellm-creds -n "$NS" >/dev/null \
+  && echo "litellm-creds present" \
+  || echo "litellm-creds MISSING — flag facilitator before continuing"
+
 kubectl apply -n "$NS" -f apps/litellm-comparison/deployment.yaml
+kubectl rollout status deploy/litellm -n "$NS" --timeout=2m
+
 LITELLM_IP=$(kubectl get svc litellm -n "$NS" \
   -o jsonpath='{.spec.clusterIP}')
 
@@ -265,11 +260,10 @@ into a directed graph. Use this when:
 - You need deterministic routing (always Triage → Specialist).
 - You want **checkpointing** so the workflow survives a pod restart.
 
-Create `apps/agent-complaint-triage/workflow.py`:
+Open [`apps/agent-complaint-triage/workflow.py`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/apps/agent-complaint-triage/workflow.py).
+The shape:
 
-```python title="apps/agent-complaint-triage/workflow.py"
-import asyncio
-import os
+```python title="apps/agent-complaint-triage/workflow.py (excerpt)"
 from pathlib import Path
 
 from agent_framework import FileCheckpointStorage, WorkflowBuilder
@@ -277,32 +271,19 @@ from agent_framework.openai import OpenAIChatClient
 from agent_framework.orchestrations import SequentialBuilder
 
 
-def make_client():
+def _client() -> OpenAIChatClient:
     return OpenAIChatClient(
-        model="gpt-5-mini",
+        model=os.environ["MODEL_NAME"],
         azure_endpoint=os.environ["APIM_URL"],
         api_version="2024-10-21",
         api_key=os.environ["APIM_KEY"],
+        default_headers={"x-model-tier": os.environ.get("MODEL_TIER", "premium")},
     )
 
 
-client = make_client()
-
-triage = client.create_agent(
-    name="Triage",
-    instructions="Classify into transactional|account|info|general.",
-)
-specialist = client.create_agent(
-    name="Specialist",
-    instructions="Generate a draft customer reply.",
-)
-compliance = client.create_agent(
-    name="Compliance",
-    instructions=(
-        "Review the draft for regulatory language. "
-        "Return APPROVED:<reply> or REJECTED:<reason>."
-    ),
-)
+triage = _client().create_agent(name="Triage", instructions="Classify ...")
+specialist = _client().create_agent(name="Specialist", instructions="Draft a reply ...")
+compliance = _client().create_agent(name="Compliance", instructions="Redact PII ...")
 
 # Cleanest path — three agents in a straight pipeline.
 sequential = SequentialBuilder(
@@ -318,19 +299,6 @@ checkpointed = (
     .with_checkpointing(storage)  # NOTE: with_checkpointing — not with_checkpoint_storage
     .build()
 )
-
-
-async def main():
-    workflow = checkpointed if os.environ.get("WORKFLOW_MODE") == "checkpoint" else sequential
-    events = await workflow.run(
-        "Saldo saya tiba-tiba berkurang Rp 500.000 tanpa transaksi yang saya kenal."
-    )
-    for output in events.get_outputs():
-        print(output)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
 ```
 
 Run it:
