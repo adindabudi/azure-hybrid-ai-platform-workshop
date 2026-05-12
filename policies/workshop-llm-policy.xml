@@ -17,7 +17,7 @@
 
         <!-- Auth: Entra ID JWT for everything except local-dev path -->
         <choose>
-            <when condition="@(context.Request.Headers.GetValueOrDefault("x-auth-mode", "entra") != "anonymous")">
+            <when condition="@(context.Request.Headers.GetValueOrDefault(&quot;x-auth-mode&quot;, &quot;entra&quot;) != &quot;anonymous&quot;)">
                 <validate-jwt header-name="Authorization" failed-validation-httpcode="401" require-scheme="Bearer">
                     <openid-config url="https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration" />
                 </validate-jwt>
@@ -58,17 +58,21 @@
             <dimension name="Subscription ID" value="@(context.Subscription.Id)" />
             <dimension name="API ID"          value="@(context.Api.Id)" />
             <dimension name="Operation ID"    value="@(context.Operation.Id)" />
-            <dimension name="Model"           value="@(context.Request.Headers.GetValueOrDefault(" x-model-tier",string.Empty))" />
+            <dimension name="Model"           value="@(context.Request.Headers.GetValueOrDefault(&quot;x-model-tier&quot;,string.Empty))" />
             <dimension name="Client IP"       value="@(context.Request.IpAddress)" />
         </llm-emit-token-metric>
 
-        <!-- M1.5 — Tier-based routing: cheap = SLM, premium = AOAI -->
+        <!-- M1.5 — Tier-based routing: cheap = SLM, premium = AOAI pool with
+             priority failover (P1=aoai-sea, P2=slm-phi4). The pool is created
+             by scripts/apply-apim-policies.sh; routing through it (rather than
+             directly to aoai-sea) is what gives M1.2 Step 4's automatic
+             failover from AOAI to the SLM when AOAI is unreachable. -->
         <choose>
-            <when condition="@(context.Request.Headers.GetValueOrDefault("x-model-tier", "premium") == "cheap")">
+            <when condition="@(context.Request.Headers.GetValueOrDefault(&quot;x-model-tier&quot;, &quot;premium&quot;) == &quot;cheap&quot;)">
                 <set-backend-service backend-id="slm-phi4" />
             </when>
             <otherwise>
-                <set-backend-service backend-id="aoai-sea" />
+                <set-backend-service backend-id="aoai-pool" />
             </otherwise>
         </choose>
     </inbound>
