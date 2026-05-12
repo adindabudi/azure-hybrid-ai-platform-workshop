@@ -157,7 +157,7 @@ LLM — through the workshop gateway:
 
 ```bash
 curl -sS \
-  "${APIM_GATEWAY}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
+  "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
   -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
   -H "Content-Type: application/json" \
   -H "x-trace-from: workshop" \
