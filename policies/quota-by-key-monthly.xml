@@ -1,0 +1,41 @@
+<!--
+  quota-by-key-monthly.xml
+  Per-tenant MONTHLY token chargeback ceiling. Pair with llm-token-limit
+  (per-minute throttling) — they answer DIFFERENT questions:
+
+    llm-token-limit with tokens-per-minute (already in workshop-llm-policy.xml)
+       ↳ "How fast can a tenant burn tokens?"  (smooths bursts, protects backend)
+    llm-token-limit with token-quota + token-quota-period (this fragment)
+       ↳ "How many tokens can a tenant spend per MONTH?"  (chargeback ceiling)
+
+  Why two stacked llm-token-limit calls work:
+    Each llm-token-limit policy maintains its own counter scoped to its
+    `counter-key` AND its window. APIM evaluates them in declaration order
+    — the first one to trip wins. Per MS Learn the policy supports
+    `tokens-per-minute` (rate limit, 429 on trip) OR
+    `token-quota` + `token-quota-period` (quota, 403 on trip), or both:
+    https://learn.microsoft.com/azure/api-management/llm-token-limit-policy#attributes
+
+    token-quota-period accepts: Hourly | Daily | Weekly | Monthly | Yearly.
+    The window start is the UTC timestamp truncated to that unit, so
+    `Monthly` resets at midnight UTC on the 1st.
+
+  How chargeback flows downstream:
+    1. This policy adds `x-quota-remaining` to every response.
+    2. Your llm-emit-token-metric policy (already applied) tags each metric
+       with the same Subscription ID counter-key.
+    3. Finance dashboard joins App Insights customMetrics on Subscription ID
+       to compute monthly burn and bill back.
+
+  In BFSI you typically grant DIFFERENT tenants DIFFERENT ceilings. To do
+  that, swap `token-quota="2000000"` for a policy expression that looks the
+  value up per Subscription.Id (Cosmos DB / Key Vault). See enterprise
+  patterns doc Pattern 4.
+-->
+<llm-token-limit
+    counter-key="@(context.Subscription.Id)"
+    token-quota="2000000"
+    token-quota-period="Monthly"
+    estimate-prompt-tokens="false"
+    remaining-quota-tokens-header-name="x-quota-remaining"
+    retry-after-header-name="x-quota-retry-after-seconds" />
