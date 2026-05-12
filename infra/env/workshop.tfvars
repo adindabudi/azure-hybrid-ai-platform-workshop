@@ -11,6 +11,10 @@
 #
 # ---------------------------------------------------------------------------
 
+# Naming prefix used by `infra/locals.tf` to build resource names. Must
+# stay in lockstep with the values shown in the docs (rg-aigw-workshop,
+# apim-aigw-xxx, aks-aigw-xxx, appi-aigw-xxx, etc.) — change both here
+# and across docs-site/docs if you re-brand.
 prefix      = "aigw"
 environment = "workshop"
 
