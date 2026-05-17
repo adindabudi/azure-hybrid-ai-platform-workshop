@@ -128,18 +128,46 @@ a same-region deploy.
 
 ## Cost ceiling (10-attendee, 1-day workshop)
 
-| Component | Region | Approx. monthly | Workshop-day cost |
-|---|---|---|---|
-| APIM Developer (classic) | Primary | ~$50 | ~$1.65/day |
-| AKS 2× `Standard_D4s_v5` | Primary | ~$280 | ~$9.30/day |
-| AI Search Basic | Primary | ~$75 | ~$2.50/day |
-| Cosmos DB | Primary | ~$25 | ~$0.85/day |
-| Storage / KV / LAW / ACR | Primary | ~$15 | ~$0.50/day |
-| AOAI `gpt-*-mini` + embeddings | AOAI region | pay-per-use | ~$2 estimated |
-| **Total** | — | ~$445/mo | **~$17/day** |
+Numbers below were verified on **May 17, 2026** against the
+[Azure Retail Prices API](https://learn.microsoft.com/rest/api/cost-management/retail-prices/azure-retail-prices)
+for the regions this repo actually deploys into
+(`indonesiacentral` for the primary RG, `southeastasia` for AOAI +
+Content Safety + the opt-in Managed Redis). Re-verify before each run
+— Azure prices move and per-region surcharges change:
+
+```bash
+# example: APIM Developer @ indonesiacentral
+curl -sG https://prices.azure.com/api/retail/prices \
+  --data-urlencode "\$filter=serviceName eq 'API Management' \
+    and skuName eq 'Developer' and armRegionName eq 'indonesiacentral'"
+```
+
+### Baseline (deployed by `terraform apply -var-file=env/workshop.tfvars`)
+
+| Component | Region | SKU | Hourly | Workshop-day (24 h) | ~Monthly |
+|---|---|---|---|---|---|
+| APIM | indonesiacentral | Developer (classic) | $0.0658 | $1.58 | ~$47 |
+| AKS node pool (2× `Standard_D4s_v5` Linux) | indonesiacentral | Base | $0.432 | $10.37 | ~$311 |
+| AI Search | indonesiacentral | Basic | $0.101 | $2.42 | ~$73 |
+| Cosmos DB (NoSQL + vector) | indonesiacentral | 400 RU/s shared @ DB | $0.032 | $0.77 | ~$23 |
+| Container Registry | indonesiacentral | Basic | $0.007 | $0.17 | ~$5 |
+| Storage / Key Vault / LAW / App Insights | indonesiacentral | Std_LRS + pay-per-GB ingest | — | ~$0.30 | ~$10 |
+| Content Safety (text & image) | southeastasia | **F0 (free)** | $0 | $0 | $0 |
+| AOAI `gpt-5-mini` Global PAYG | southeastasia | $0.45 in / $3.60 out per 1M tok | pay-per-use | ~$2-5 | varies |
+| AOAI `text-embedding-3-large` Global | southeastasia | $0.13 per 1M tok | pay-per-use | <$0.10 | varies |
+| **Baseline total (always-on infra + typical tokens)** | — | — | — | **~$17-20/day** | **~$469/mo + tokens** |
+
+### Opt-in add-ons (off by default; toggle in [`infra/env/workshop.tfvars`](infra/env/workshop.tfvars))
+
+| Add-on | Toggle | Region | SKU | Day | ~Month |
+|---|---|---|---|---|---|
+| Azure Managed Redis ([semantic cache backing](policies/llm-semantic-cache-lookup.xml)) | `enable_semantic_cache = true` | southeastasia | `Balanced_B0` (smallest valid) | $0.48 | ~$14 |
+|  |  | southeastasia | `Balanced_B5` (recommended for live cache-hit demos) | $4.63 | ~$139 |
+| Foundry project ([RedTeam](apps/eval-suite/redteam.py) + `FoundryEvals`) | `enable_foundry_project = true` | eastus2 / francecentral / swedencentral / switzerlandwest / northcentralus | AIServices S0 (platform free) | $0 + tokens at AOAI rates above | $0 + tokens |
+| Content Safety **S0** (production-realistic limits, drops the 1K req/day F0 cap) | `content_safety_sku = "S0"` | southeastasia | S0 | ~$0.50 (for ~1,300 text records) | pay-per-use |
 
 Tear down with `terraform destroy` after the workshop — APIM Developer
-takes ~10 min to delete.
+takes ~10 min to delete; Managed Redis ~5 min on top if it was enabled.
 
 ## Deploying the docs
 
