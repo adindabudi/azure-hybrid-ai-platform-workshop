@@ -1,0 +1,2 @@
+{"query": "Kartu ATM saya tertelan.", "response": "Klasifikasi: transactional/high. Silakan blokir kartu via 1500-XXX.", "context": "Tool: transactional/high", "ground_truth": "Acknowledge + classify + block card"}
+{"query": "Lupa password mobile banking.", "response": "Reset via menu Lupa Password di app.", "context": "Tool: account-access/high", "ground_truth": "Guide to reset flow"}

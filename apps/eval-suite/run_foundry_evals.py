@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from azure.ai.evaluation import (
@@ -117,19 +118,65 @@ def main() -> int:
     # Each evaluator is configured with the judge model. The `evaluate`
     # function streams every row of test data through every evaluator
     # and writes a consolidated JSON output.
-    result = evaluate(
-        data=str(DATA),
-        evaluators={
-            "intent_resolution": IntentResolutionEvaluator(model_config=cfg),
-            "tool_call_accuracy": ToolCallAccuracyEvaluator(model_config=cfg),
-            "task_adherence": TaskAdherenceEvaluator(model_config=cfg),
-            "relevance": RelevanceEvaluator(model_config=cfg),
-            "groundedness": GroundednessEvaluator(model_config=cfg),
-        },
-        output_path=str(OUTPUT),
-    )
+    #
+    # Token-budget note: every evaluator costs ~150-400 tokens per row.
+    # Running all five on N rows at once burns 5 * 400 * N tokens in a
+    # single minute, which trips the APIM `llm-token-limit` (default
+    # 5000 TPM in the workshop bundle, 500 TPM in earlier revisions)
+    # and the evaluator silently gets `null` for the throttled rows.
+    #
+    # To stay within budget we run the evaluators in two batches with a
+    # cooldown in between. Skip batching by setting `EVAL_BATCH=0`.
+    all_evaluators = {
+        "intent_resolution": IntentResolutionEvaluator(model_config=cfg),
+        "tool_call_accuracy": ToolCallAccuracyEvaluator(model_config=cfg),
+        "task_adherence": TaskAdherenceEvaluator(model_config=cfg),
+        "relevance": RelevanceEvaluator(model_config=cfg),
+        "groundedness": GroundednessEvaluator(model_config=cfg),
+    }
 
-    metrics = result.get("metrics", {})
+    if os.environ.get("EVAL_BATCH", "1") == "1":
+        # Two batches keep peak TPM under ~1500 even on a tight budget.
+        batches = [
+            {
+                "intent_resolution": all_evaluators["intent_resolution"],
+                "task_adherence":    all_evaluators["task_adherence"],
+                "tool_call_accuracy": all_evaluators["tool_call_accuracy"],
+            },
+            {
+                "relevance":     all_evaluators["relevance"],
+                "groundedness":  all_evaluators["groundedness"],
+            },
+        ]
+    else:
+        batches = [all_evaluators]
+
+    cooldown = int(os.environ.get("EVAL_COOLDOWN_SEC", "65"))
+    merged_metrics: dict[str, object] = {}
+    merged_rows: list[dict] = []
+
+    for i, batch in enumerate(batches, start=1):
+        out_path = OUTPUT.with_suffix(f".batch{i}.json") if len(batches) > 1 else OUTPUT
+        print(f"\n--- Batch {i}/{len(batches)} :: {', '.join(batch.keys())} ---")
+        result = evaluate(
+            data=str(DATA),
+            evaluators=batch,
+            output_path=str(out_path),
+        )
+        merged_metrics.update(result.get("metrics", {}))
+        merged_rows.extend(result.get("rows", []))
+
+        if i < len(batches) and cooldown > 0:
+            print(f"  (cooldown {cooldown}s before next batch to let TPM window slide)")
+            time.sleep(cooldown)
+
+    # Write the merged top-level file.
+    OUTPUT.write_text(json.dumps(
+        {"metrics": merged_metrics, "rows": merged_rows},
+        indent=2, default=str,
+    ), encoding="utf-8")
+
+    metrics = merged_metrics
     print("\n=== Evaluation summary ===")
     for name, value in sorted(metrics.items()):
         print(f"  {name}: {value}")
