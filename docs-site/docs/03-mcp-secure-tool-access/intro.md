@@ -28,6 +28,23 @@ server that implements it. Three primitives:
 MCP standardises the contract so the same agent can talk to a database
 server, a CRM server, and a payments server without three custom integrations.
 
+:::tip Why MCP belongs behind the same gateway as your LLM
+MCP started as an open standard with **Microsoft and Anthropic as the
+original co-authors** — the protocol is intentionally model- and
+vendor-neutral so an agent built today doesn't get stranded next year.
+The Azure platform side of that bet is the **APIM native MCP export**:
+any REST API already published in API Management can be exposed as a
+first-class MCP endpoint, inheriting the same JWT, rate-limit, OAuth,
+and audit policies you write for everything else. That means the *one*
+policy XML your security team already reviews protects every
+tool-using agent in your estate — you don't grow a parallel set of
+"MCP-only" controls.
+
+See [Export REST API as MCP server](https://learn.microsoft.com/azure/api-management/export-rest-mcp-server)
+for the official walkthrough; the workshop uses the same primitive
+for [`apps/mcp-customer-tool/`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/tree/main/apps/mcp-customer-tool).
+:::
+
 The official APIM-MCP integration is documented at
 [Export REST API as MCP server](https://learn.microsoft.com/azure/api-management/export-rest-mcp-server).
 
@@ -130,7 +147,7 @@ OAuth/PKCE policy, and rate-limit-by-key are applied per
 # Without token → 401
 curl -sS -o /dev/null -w "%{http_code}\n" \
   "${APIM_GATEWAY_URL}/mcp/${NAMESPACE}/sse" \
-  -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}"
+  -H "api-key: ${APIM_KEY}"
 # Expected: 401
 ```
 
@@ -142,32 +159,40 @@ TOKEN=$(az account get-access-token --resource "$MCP_APP_ID" --query accessToken
 
 curl -sS -i \
   "${APIM_GATEWAY_URL}/mcp/${NAMESPACE}/sse" \
-  -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+  -H "api-key: ${APIM_KEY}" \
   -H "Authorization: Bearer ${TOKEN}" | head -8
 # Expected: HTTP/1.1 200 OK, Content-Type: text/event-stream
 ```
 
 ### Verify the rate limit kicks in
 
-The OAuth policy also includes `<rate-limit-by-key calls="120"
-renewal-period="60">`. Hammer the endpoint and watch for 429s:
+The OAuth policy also includes `<rate-limit-by-key calls="10"
+renewal-period="60">` — deliberately low so the burst loop trips it in
+seconds. Hammer the endpoint and watch for 429s:
 
 ```bash
-for i in $(seq 1 150); do
+for i in $(seq 1 20); do
   curl -sS -o /dev/null -w "%{http_code}\n" \
     "${APIM_GATEWAY_URL}/mcp/${NAMESPACE}/sse" \
-    -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+    -H "api-key: ${APIM_KEY}" \
     -H "Authorization: Bearer ${TOKEN}"
 done | sort | uniq -c
 ```
 
 **Expected output** — a mix of `200` and `429`, with at least one 429
-after the 120th request in any 60-second window.
+after the 10th request in any 60-second window.
 
 ```
-    120 200
-     30 429
+     10 200
+     10 429
 ```
+
+:::tip Why so low?
+10 calls/60s is a workshop value — easy to demo, easy to recover from.
+Production MCP servers typically sit between 100 and 1,000 calls/60s
+per subscription, sized to the tool's downstream cost. Edit
+`policies/mcp-oauth-pkce.xml` and re-apply when you raise it.
+:::
 
 ## Step 3 — Read the OAuth/PKCE policy
 
@@ -185,7 +210,7 @@ after the 120th request in any 60-second window.
                 </claim>
             </required-claims>
         </validate-jwt>
-        <rate-limit-by-key calls="120" renewal-period="60"
+        <rate-limit-by-key calls="10" renewal-period="60"
                           counter-key="@(context.Subscription.Id)" />
     </inbound>
     <backend><base /></backend>

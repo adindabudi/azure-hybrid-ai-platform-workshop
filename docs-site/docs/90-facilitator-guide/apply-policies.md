@@ -12,43 +12,47 @@ the APIM portal — **you** do those steps once, here.
 
 Run everything in this guide before the workshop starts.
 
-## Recommended path: one script, ~2 minutes
+:::tip Easier path — let the script do it
+The whole setup is encapsulated in
+[`scripts/apply-apim-policies.sh`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/scripts/apply-apim-policies.sh).
+It is idempotent — safe to re-run after each Terraform apply — and it
+already handles the four foot-guns that bit us during the May 2026 run:
 
-Steps 1–7 below used to be manual portal-paste work. They're now wrapped
-in a single idempotent script:
+1. **Stale `terraform.tfstate`** — if you've just refreshed the AKS
+   module and the APIM ID/resource group rotated, the script reads the
+   current outputs each time. Run `terraform output -json | jq .` first
+   to make sure those names match what you expect; if not,
+   `cd infra && terraform refresh` once before re-applying policies.
+2. **API → product linkage** — `az apim api import` creates the API but
+   does not attach it to any product. Without that link, every
+   per-attendee subscription key returns
+   `401 invalid subscription key`. The script now loops over every
+   `attendee-*` product and `PUT`s the link.
+3. **Content Safety guard** — the policy bundle references the
+   `content-safety-sea` backend. Pass `--with-content-safety` if you
+   provisioned it (extra ~USD 1/hour); the script otherwise strips the
+   `<llm-content-safety>` block automatically so attendees don't see
+   `Backend with id 'content-safety-sea' could not be found`.
+4. **App Insights diagnostic** — `az apim logger list` is not exposed
+   by the CLI; the script now discovers loggers via `az rest` and wires
+   the `applicationinsights` diagnostic on the `openai` API. Without it,
+   the M2 `customMetrics` KQL returns 0 rows.
 
 ```bash
+# happy path
 ./scripts/apply-apim-policies.sh
+
+# include Content Safety + monthly quota policy
+./scripts/apply-apim-policies.sh --with-content-safety --with-quota
+
+# dry-run, prints every az call without mutating
+./scripts/apply-apim-policies.sh --dry-run
 ```
 
-That covers the **default workshop bundle**: AOAI API import, MI role
-grants, all four backends, the priority pool, the AOAI **circuit
-breaker** (production-grade, MS Learn requirement), the App Insights
-diagnostic with `metrics: true`, and the policy XML push. The rest of
-this page documents what the script does so you can reason about it,
-extend it, or run individual steps by hand.
-
-Optional flags weave in additional patterns from
-[`docs/01-gateway-foundations/enterprise-patterns.md`](../gateway-foundations/enterprise-patterns):
-
-```bash
-# Default workshop bundle + chargeback quota + PII mask
-./scripts/apply-apim-policies.sh --with-quota --with-pii-mask
-
-# Add Content Safety backend (cloud path)
-./scripts/apply-apim-policies.sh --with-content-safety
-
-# Add immutable audit trail to Event Hubs (BFSI compliance)
-EH_NAMESPACE=eh-audit EH_HUB_NAME=apim-audit \
-EH_CONNSTR='Endpoint=sb://...;EntityPath=apim-audit' \
-./scripts/apply-apim-policies.sh --with-audit
-```
-
-`--dry-run` prints every command without executing.
-
-After the script returns, jump to [Verify everything is green](#verify-everything-is-green)
-to confirm. The manual steps below remain as the **reference of what
-the script does** in case anything fails or you need to extend it.
+The walkthrough below documents the same steps so you can fix things
+manually when the script is not the right tool (one-off backend, custom
+diagnostic, recovery).
+:::
 
 ## One-time setup
 
@@ -64,12 +68,7 @@ APIM_MI=$(az apim show -g "$RG" -n "$APIM" --query "identity.principalId" -o tsv
 AOAI_ID=$(az cognitiveservices account show -g "$RG" -n "$AOAI" --query id -o tsv)
 ```
 
-## M1 — Reference: what `apply-apim-policies.sh` does, step by step
-
-Everything in this M1 section is what the **script does for you**.
-Read it to understand the moving parts; only run the commands manually
-if the script can't (e.g. you're applying to an APIM the Terraform
-module didn't create).
+## M1 — Import the AOAI API + register backends
 
 ### 1. Import the AOAI OpenAPI spec into APIM
 
@@ -98,6 +97,29 @@ az apim api import \
   --protocols https
 ```
 
+### 1.5. Link the `openai` API to every attendee product
+
+`az apim api import` creates the API but **does not** attach it to any
+product. Until you link it, every per-attendee subscription key returns
+`401 invalid subscription key`, which looks like a credential bug but
+is actually missing authorization on the product → API edge.
+
+```bash
+APIM_ID=$(az apim show -g "$RG" -n "$APIM" --query id -o tsv)
+MGMT=https://management.azure.com${APIM_ID}
+
+# Discover every per-attendee product the Terraform module created.
+az rest --method get \
+  --url "${MGMT}/products?api-version=2024-05-01" \
+  --query "value[?starts_with(name, 'attendee-')].name" -o tsv |
+while read -r PRODUCT_ID; do
+  az rest --method put \
+    --url "${MGMT}/products/${PRODUCT_ID}/apis/openai?api-version=2024-05-01" \
+    --output none
+  echo "Linked openai to ${PRODUCT_ID}"
+done
+```
+
 ### 2. Grant the APIM managed identity access to AOAI
 
 ```bash
@@ -110,20 +132,20 @@ az role assignment create \
 
 ### 3. Register the AOAI + embeddings backends
 
-The `az apim backend` subcommand doesn't exist; backends are
-created via the management API. Both backends use APIM's system-assigned
-managed identity to call AOAI — no key in the policy or named value.
-
 ```bash
-APIM_ID=$(az apim show -g "$RG" -n "$APIM" --query id -o tsv)
+az apim backend create \
+  -g "$RG" --service-name "$APIM" \
+  --backend-id aoai-sea \
+  --url "${AOAI_ENDPOINT}/openai" \
+  --protocol http \
+  --credentials-managed-identity-resource "https://cognitiveservices.azure.com"
 
-az rest --method put \
-  --url "https://management.azure.com${APIM_ID}/backends/aoai-sea?api-version=2024-05-01" \
-  --body "{\"properties\":{\"url\":\"${AOAI_ENDPOINT}/openai\",\"protocol\":\"http\",\"credentials\":{\"managedIdentity\":{\"resource\":\"https://cognitiveservices.azure.com\"}}}}"
-
-az rest --method put \
-  --url "https://management.azure.com${APIM_ID}/backends/embeddings-backend?api-version=2024-05-01" \
-  --body "{\"properties\":{\"url\":\"${AOAI_ENDPOINT}/openai/deployments/text-embedding-3-large\",\"protocol\":\"http\",\"credentials\":{\"managedIdentity\":{\"resource\":\"https://cognitiveservices.azure.com\"}}}}"
+az apim backend create \
+  -g "$RG" --service-name "$APIM" \
+  --backend-id embeddings-backend \
+  --url "${AOAI_ENDPOINT}/openai/deployments/text-embedding-3-large" \
+  --protocol http \
+  --credentials-managed-identity-resource "https://cognitiveservices.azure.com"
 ```
 
 ### 4. Register the self-hosted SLM backend
@@ -143,20 +165,22 @@ kubectl get svc slm-phi4 -n slm -w
 SLM_IP=$(kubectl get svc slm-phi4 -n slm \
   -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 
-az rest --method put \
-  --url "https://management.azure.com${APIM_ID}/backends/slm-phi4?api-version=2024-05-01" \
-  --body "{\"properties\":{\"url\":\"http://${SLM_IP}:8000/v1\",\"protocol\":\"http\"}}"
+az apim backend create \
+  -g "$RG" --service-name "$APIM" \
+  --backend-id slm-phi4 \
+  --url "http://${SLM_IP}:8000/v1" \
+  --protocol http
 ```
 
 ### 5. Backend pool with priority + failover
 
-Pools require `type=Pool` and the inner `pool.services[].id` must point
-to the backend resource path (`/backends/<name>`):
-
 ```bash
-az rest --method put \
-  --url "https://management.azure.com${APIM_ID}/backends/aoai-pool?api-version=2024-05-01" \
-  --body '{"properties":{"type":"Pool","pool":{"services":[{"id":"/backends/aoai-sea","priority":1,"weight":100},{"id":"/backends/slm-phi4","priority":2,"weight":100}]}}}'
+az apim backend create \
+  -g "$RG" --service-name "$APIM" \
+  --backend-id aoai-pool \
+  --type Pool \
+  --url "https://placeholder" \
+  --pool '{"services":[{"id":"/backends/aoai-sea","priority":1,"weight":100},{"id":"/backends/slm-phi4","priority":2,"weight":100}]}'
 ```
 
 ### 6. Wire the App Insights diagnostic on the openai API (required for `llm-emit-token-metric`)
@@ -173,10 +197,20 @@ so call the management API:
 ```bash
 APIM_ID=$(az apim show -g "$RG" -n "$APIM" --query id -o tsv)
 
+# Discover the App Insights logger ID dynamically. The Terraform module
+# usually names it `appi-logger`, but earlier runs created `appi-aigw-*`
+# or similar — `az rest` is the reliable source. (Note: there is no
+# `az apim logger list` subcommand, despite older docs hinting at one.)
+LOGGER_ID=$(az rest --method get \
+  --url "https://management.azure.com${APIM_ID}/loggers?api-version=2024-05-01" \
+  --query "value[?properties.loggerType=='applicationInsights'] | [0].id" \
+  -o tsv)
+test -n "$LOGGER_ID" || { echo "No App Insights logger on $APIM"; exit 1; }
+
 cat > /tmp/diag.json <<JSON
 {
   "properties": {
-    "loggerId": "${APIM_ID}/loggers/appi-logger",
+    "loggerId": "${LOGGER_ID}",
     "sampling": { "samplingType": "fixed", "percentage": 100 },
     "alwaysLog": "allErrors",
     "logClientIp": true,
@@ -253,47 +287,25 @@ Click **Save**.
 
 ## M2 — Content safety (pick one path)
 
-:::caution Content Safety entitlement
-The default workshop Terraform **does not** create a Content Safety
-account — many Internal / MCAP / trial subscriptions lack the
-entitlement (see comment block in
-[`infra/modules/aoai-singapore/main.tf`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/infra/modules/aoai-singapore/main.tf)).
-The M2 docs' verifier (`curl ... jailbreak → 403`) will return **200**
-on a workshop deployed without one of the paths below. Decide before
-the workshop whether you'll skip M2 Step 4's verification or enable
-one of these paths.
-:::
-
 ### Path A — Cloud Content Safety resource
 
-Requires a Content Safety entitlement on your subscription. Create the
-resource yourself (or un-comment the CS block in the module and
-re-apply), then point `apply-apim-policies.sh` at it:
-
 ```bash
-# 1. Create or identify an existing Content Safety resource
-CS_NAME=cs-aigw-sea-${SUFFIX}   # match your convention
-az cognitiveservices account create \
-  -g "$RG" -n "$CS_NAME" -l southeastasia \
-  --kind ContentSafety --sku S0 --yes
+CS_NAME=$(terraform -chdir=infra output -raw content_safety_name)
 CS_ID=$(az cognitiveservices account show -g "$RG" -n "$CS_NAME" --query id -o tsv)
 CS_ENDPOINT=$(az cognitiveservices account show --ids "$CS_ID" --query properties.endpoint -o tsv)
 
-# 2. Grant APIM MI access
 az role assignment create \
   --assignee-object-id "$APIM_MI" \
   --assignee-principal-type ServicePrincipal \
   --role "Cognitive Services User" \
   --scope "$CS_ID"
 
-# 3. Register the backend (manual)
-APIM_ID=$(az apim show -g "$RG" -n "$APIM" --query id -o tsv)
-az rest --method put \
-  --url "https://management.azure.com${APIM_ID}/backends/content-safety-sea?api-version=2024-05-01" \
-  --body "{\"properties\":{\"url\":\"${CS_ENDPOINT}\",\"protocol\":\"http\",\"credentials\":{\"managedIdentity\":{\"resource\":\"https://cognitiveservices.azure.com\"}}}}"
-
-# 4. OR — let the automation script do steps 2-3 for you
-CONTENT_SAFETY_NAME="$CS_NAME" ./scripts/apply-apim-policies.sh --with-content-safety
+az apim backend create \
+  -g "$RG" --service-name "$APIM" \
+  --backend-id content-safety-sea \
+  --url "$CS_ENDPOINT" \
+  --protocol http \
+  --credentials-managed-identity-resource "https://cognitiveservices.azure.com"
 ```
 
 ### Path B — Content Safety container on AKS (in-region)
@@ -468,34 +480,20 @@ sets this; re-run `terraform apply` if it's missing.
 Attendees deploy their own MCP server in their namespace — see
 [M3](../mcp-secure-tool-access/intro) Step 1, which only needs namespace
 RBAC. Registering the MCP backend behind APIM is admin work; do it
-once per attendee namespace **after attendees have deployed their MCP
-server**, so the loop skips namespaces that don't have one yet:
+once per attendee namespace if you want a shared catalog:
 
 ```bash
 for NN in $(seq -f '%02g' 1 10); do
   NS="attendee-${NN}"
-  # Skip namespaces where attendee hasn't deployed yet
-  kubectl get svc mcp-customer-tool -n "$NS" >/dev/null 2>&1 || continue
-
   kubectl annotate svc mcp-customer-tool -n "$NS" \
     service.beta.kubernetes.io/azure-load-balancer-internal=true --overwrite
 
-  # Wait up to 60s for the internal LB to allocate an IP
-  for _ in {1..12}; do
-    MCP_LB=$(kubectl get svc mcp-customer-tool -n "$NS" \
-      -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
-    [[ -n "$MCP_LB" ]] && break
-    sleep 5
-  done
-  if [[ -z "$MCP_LB" ]]; then
-    echo "!! $NS: internal LB IP not assigned within 60s, skipping"
-    continue
-  fi
+  MCP_LB=$(kubectl get svc mcp-customer-tool -n "$NS" \
+    -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+  [[ -z "$MCP_LB" ]] && continue
 
-  APIM_ID=$(az apim show -g "$RG" -n "$APIM" --query id -o tsv)
-  az rest --method put \
-    --url "https://management.azure.com${APIM_ID}/backends/mcp-${NS}?api-version=2024-05-01" \
-    --body "{\"properties\":{\"url\":\"http://${MCP_LB}:8765\",\"protocol\":\"http\"}}"
+  az apim backend create -g "$RG" --service-name "$APIM" \
+    --backend-id "mcp-${NS}" --url "http://${MCP_LB}:8765" --protocol http
   az apim api create -g "$RG" --service-name "$APIM" \
     --api-id "mcp-${NS}" --display-name "MCP: ${NS}" \
     --path "mcp/${NS}" --protocols https \

@@ -7,12 +7,20 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'M0 — Setup',
       collapsed: false,
-      items: ['intro/setup', 'intro/architecture-reality-check'],
+      items: [
+        'intro/setup',
+        'intro/architecture-reality-check',
+      ],
     },
     {
       type: 'category',
       label: 'M1 — Gateway Foundations',
-      items: ['gateway-foundations/intro', 'gateway-foundations/policies'],
+      items: [
+        'gateway-foundations/intro',
+        'gateway-foundations/policy-anatomy',
+        'gateway-foundations/policies',
+        'gateway-foundations/enterprise-patterns',
+      ],
     },
     {
       type: 'category',
@@ -40,6 +48,12 @@ const sidebars: SidebarsConfig = {
       items: ['otel-end-to-end/intro'],
     },
     'wrap-up/index',
+    {
+      type: 'category',
+      label: 'Appendix — Industry playbooks (Indonesia)',
+      collapsed: true,
+      items: ['industry-playbooks/index'],
+    },
     {
       type: 'category',
       label: 'Facilitator Guide',

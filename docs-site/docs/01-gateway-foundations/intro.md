@@ -17,7 +17,9 @@ will be able to answer:
 - What does "AI Gateway" actually mean in terms of policies?
 
 If you only have an hour, skim this page and jump straight to
-[M1.1 — Hands-on policies](./policies).
+[M1.2 — Hands-on policies](./policies). Otherwise, the recommended path
+is **M1.0 (this page) → [M1.1 anatomy](./policy-anatomy) →
+[M1.2 hands-on](./policies) → [M1.4 enterprise patterns](./enterprise-patterns)**.
 
 ## The before/after
 
@@ -106,4 +108,7 @@ inline in M1.1–M1.3.
 
 ## Next
 
-[M1.1 — Hands-on policies](./policies)
+[M1.1 — Anatomy of a policy](./policy-anatomy) (start here if XML
+sections like `<inbound>` are new to you), or jump to
+[M1.2 — Hands-on policies](./policies) if you already know the section
+model.

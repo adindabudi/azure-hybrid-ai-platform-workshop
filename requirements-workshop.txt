@@ -1,0 +1,50 @@
+# =============================================================================
+# Workshop core Python dependencies — pinned for reproducibility.
+#
+# Modules M0–M6 install this single file. M5 (evaluation + red-team)
+# pulls additional packages via apps/eval-suite/requirements.txt — see
+# that file before running M5 if you skipped it earlier.
+#
+# Pip command:
+#   pip install --pre -r requirements-workshop.txt
+#
+# Why `--pre`:
+#   `microsoft-agents-a365-observability-*` and a handful of
+#   agent-framework provider sub-packages still ship pre-release wheels.
+#   We pin the exact versions below so `--pre` only loosens the resolver,
+#   it does not change what you get.
+#
+# Verified May 2026 on Python 3.11–3.13, Linux/macOS/Windows.
+# =============================================================================
+
+# ---- Microsoft Agent Framework (meta + the OpenAI provider we use) ----------
+# The OpenAI provider gives you both OpenAIChatClient (Responses API) and
+# OpenAIChatCompletionClient (chat-completions API). The workshop uses
+# OpenAIChatCompletionClient because APIM Developer SKU only imports the
+# chat-completions ops from azure-rest-api-specs. See apps/agent-complaint-triage/README.md.
+agent-framework==1.4.0
+agent-framework-openai==1.4.0
+
+# Foundry connectors — M4 Step 4(d) (FoundryLocalClient) and M4 Step 7 (cloud Foundry).
+agent-framework-foundry==1.4.0
+agent-framework-foundry-local==1.0.0b260514
+
+# ---- LangChain trio (M6 ‘before’ snippet + A365 instrumentor) ---------------
+# The A365 LangChain instrumentor (`wrap_function_wrapper(module=...)`)
+# breaks against langchain-core 1.3.0a — keep these pinned together.
+langchain==1.2.15
+langchain-core==1.2.31
+langchain-openai==1.1.14
+wrapt<2
+
+# ---- A365 observability (M6 ‘after’ snippet, end-to-end OTel) ---------------
+microsoft-agents-a365-observability-core==1.0.0
+microsoft-agents-a365-observability-extensions-langchain==1.0.0
+microsoft-agents-a365-observability-extensions-agent-framework==1.0.0
+
+# ---- Azure Monitor + OTLP exporter (M2 + M6) --------------------------------
+azure-monitor-opentelemetry==1.8.8
+opentelemetry-exporter-otlp==1.40.0
+
+# ---- Auth (everything that hits Azure control- or data-plane) ---------------
+azure-identity>=1.17.1,<2.0.0

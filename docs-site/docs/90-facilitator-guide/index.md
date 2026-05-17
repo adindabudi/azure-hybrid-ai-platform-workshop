@@ -30,6 +30,7 @@ If you are an attendee, ignore this section and start at
 │                                                                  │
 │ 3. Apply the APIM AI-gateway policies                            │
 │    → ./facilitator-guide/apply-policies                           │
+│    (single command: `./scripts/apply-apim-policies.sh`)          │
 ├──────────────────────────────────────────────────────────────────┤
 │   Workshop morning                                               │
 ├──────────────────────────────────────────────────────────────────┤

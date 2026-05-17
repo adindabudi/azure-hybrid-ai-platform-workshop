@@ -5,6 +5,57 @@ sidebar_position: 1
 
 # M4 — Agent Framework: build, connect, compose
 
+## Why Microsoft Agent Framework?
+
+If you have been building with **Semantic Kernel** or **AutoGen** — both
+very popular open-source frameworks born inside Microsoft — the question
+you probably have is: *why a new SDK?*
+
+The short, official answer from the
+[Agent Framework overview](https://learn.microsoft.com/agent-framework/overview/#why-agent-framework):
+
+> *"Semantic Kernel and AutoGen pioneered the concepts of AI agents and
+> multi-agent orchestration. The Agent Framework is the direct
+> successor, created by the same teams. It combines AutoGen's simple
+> abstractions for single- and multi-agent patterns with Semantic
+> Kernel's enterprise-grade features such as session-based state
+> management, type safety, filters, telemetry, and extensive model and
+> embedding support. […] In short, Agent Framework is the next
+> generation of both Semantic Kernel and AutoGen."*
+
+What that means in practice for a team that already invested in either:
+
+| You came from… | What carries over | What changes |
+| --- | --- | --- |
+| **Semantic Kernel** | Filters, telemetry, plugin → tool concepts, model providers | `Kernel` → `Agent` / `ChatClient`; explicit `Workflow` graphs replace ad-hoc planner chains. [SK migration guide](https://learn.microsoft.com/agent-framework/migration-guide/from-semantic-kernel/) |
+| **AutoGen** | Single- and multi-agent patterns, function tools, streaming | `Team` → typed `Workflow` (data-flow, not control-flow); `@tool` infers schemas automatically. [AutoGen migration guide](https://learn.microsoft.com/agent-framework/migration-guide/from-autogen/) |
+| **LangChain / LangGraph** | Existing chains stay as-is | Add the A365 LangChain instrumentor for observability (3 lines) or replace only the LLM client — see [M4.1](./migrate-from-langgraph). |
+
+Three concrete reasons this module uses **Agent Framework** for the
+day's labs — none of them require you to abandon what you have today:
+
+1. **One Python object, four runtimes.** The same `Agent` class in
+   Step 4 below switches between APIM-fronted Azure OpenAI, a
+   self-hosted Phi-4 SLM on AKS, LiteLLM, and Foundry Local on your
+   laptop by changing one env var. This is the **hybrid AI**
+   pattern this workshop exists to demonstrate — you build once,
+   route by policy or cost.
+2. **Typed `Workflow` + checkpointing for long-running agents.** Step 6
+   ships a 3-agent workflow with `FileCheckpointStorage`. The same
+   pattern works with `CosmosCheckpointStorage` in production —
+   important for any flow that must survive a pod restart (claim
+   adjudication, KYC review, complaint triage where the human review
+   step can take hours).
+3. **First-class C# parity.** Many regulated organisations in
+   Indonesia (and globally) run .NET on their core integration layer.
+   MAF ships C# and Python with the same shape — your platform team
+   can host MAF agents in the same .NET runtime they already secure,
+   monitor, and patch. SK had this; LangGraph .NET is community-only.
+
+Everything in this module is grounded in the
+[Microsoft Agent Framework docs](https://learn.microsoft.com/agent-framework/);
+none of the patterns below are workshop-only inventions.
+
 ## What you will accomplish
 
 In this 75-minute module you will:
@@ -32,26 +83,37 @@ source .venv/bin/activate
 
 python - <<'PY'
 from importlib.metadata import version
-from agent_framework.openai import OpenAIChatClient
+from agent_framework import Agent
+from agent_framework.openai import OpenAIChatCompletionClient
 
 print("agent-framework", version("agent-framework"))
-print("OpenAIChatClient module", OpenAIChatClient.__module__)
+print("client module", OpenAIChatCompletionClient.__module__)
+print("Agent module", Agent.__module__)
 PY
 ```
 
-**Expected output** (the exact rc tag depends on what M0 pinned):
+**Expected output** (versions should match `requirements-workshop.txt`):
 
 ```
-agent-framework 1.0.0rc6
-OpenAIChatClient module agent_framework.openai
+agent-framework 1.4.0
+client module agent_framework.openai
+Agent module agent_framework
 ```
 
-:::note 1.0.0rc6 changed where the OpenAI client lives
-Until rc5 you could write `from agent_framework import OpenAIChatClient`.
-From rc6 onwards the OpenAI/Azure-OpenAI clients are in the
-`agent_framework.openai` subpackage (`agent-framework-openai` on PyPI),
-and the old `AzureOpenAIChatClient` from `agent_framework.azure` was
-removed in favor of `OpenAIChatClient` with `azure_endpoint=...`.
+:::note Why `OpenAIChatCompletionClient` and not `OpenAIChatClient`?
+`agent-framework` 1.4.0 split the OpenAI surface in two:
+
+- `OpenAIChatClient` → OpenAI **Responses API** (`/v1/responses`).
+  Azure OpenAI exposes it, but the APIM Developer SKU in this workshop
+  only imports the chat-completions ops from `azure-rest-api-specs`,
+  so requests to `/responses` 404 at the gateway.
+- `OpenAIChatCompletionClient` → the **chat completions** endpoint
+  (`/openai/deployments/{name}/chat/completions`), which is what APIM
+  exposes.
+
+Use `OpenAIChatCompletionClient` everywhere APIM sits in front of AOAI
+— which is everywhere in this workshop. Use `OpenAIChatClient` only
+when calling Azure OpenAI directly without APIM in front of it.
 :::
 
 If the import fails, revisit [M0 Step 6](../00-intro/setup.md).
@@ -67,8 +129,8 @@ Open [`apps/agent-complaint-triage/agent.py`](https://github.com/adindabudi/azur
 import asyncio
 import os
 
-# Post-rc6: OpenAI/Azure-OpenAI clients live in agent_framework.openai.
-from agent_framework.openai import OpenAIChatClient
+from agent_framework import Agent
+from agent_framework.openai import OpenAIChatCompletionClient  # APIM uses chat completions
 
 
 def classify_complaint(text: str) -> dict:
@@ -89,8 +151,8 @@ def classify_complaint(text: str) -> dict:
     return {"category": category, "urgency": urgency}
 
 
-def build_agent():
-    client = OpenAIChatClient(
+def build_agent() -> Agent:
+    client = OpenAIChatCompletionClient(
         model=os.environ["MODEL_NAME"],
         azure_endpoint=os.environ["APIM_URL"],
         api_version="2024-10-21",
@@ -99,9 +161,10 @@ def build_agent():
         default_headers={"x-model-tier": os.environ.get("MODEL_TIER", "premium")},
     )
 
-    # `client.create_agent(...)` is the convenience method that returns
-    # a configured ChatAgent.
-    return client.create_agent(
+    # ``client.create_agent(...)`` was removed in 1.4.0 — construct
+    # an ``Agent`` directly.
+    return Agent(
+        client=client,
         name="ComplaintTriage",
         instructions=(
             "You triage customer support requests. "
@@ -115,9 +178,10 @@ def build_agent():
 
 Three things to notice:
 
-1. **Single client class** — `OpenAIChatClient` is the same class used for
-   all four backends in Step 4 below. No `AzureOpenAIChatClient` /
-   `LiteLLMChatClient` adapters.
+1. **One client class per endpoint family** — `OpenAIChatCompletionClient`
+   is what you point at any OpenAI-compatible *chat-completions* endpoint:
+   APIM, AOAI direct, LiteLLM. For Foundry Local you swap in
+   `FoundryLocalClient` (see Step 4d).
 2. **Tool = plain function** — `classify_complaint` is a normal Python
    function. The agent framework picks up its type hints and docstring
    to build the tool schema.
@@ -149,9 +213,12 @@ new trace with `service.name=ComplaintTriage` and one tool call to
 
 ## Step 4 — Same agent, four runtimes
 
-The interesting design point of MAF: the **same `OpenAIChatClient` class**
-works against four different backends. You don't need a separate
-`AzureOpenAIChatClient` or `LiteLLMChatClient`.
+The interesting design point of MAF: the **same `OpenAIChatCompletionClient`
+class** works against any OpenAI-compatible chat-completions endpoint.
+Three of the four runtimes below need only env-var changes.
+Foundry Local is the one exception — it has its own client class
+(`FoundryLocalClient`) because the on-disk runtime exposes a different
+protocol.
 
 ### (a) APIM-fronted AOAI Singapore — what you just ran
 
@@ -266,13 +333,13 @@ The shape:
 ```python title="apps/agent-complaint-triage/workflow.py (excerpt)"
 from pathlib import Path
 
-from agent_framework import FileCheckpointStorage, WorkflowBuilder
-from agent_framework.openai import OpenAIChatClient
+from agent_framework import Agent, FileCheckpointStorage, WorkflowBuilder
+from agent_framework.openai import OpenAIChatCompletionClient
 from agent_framework.orchestrations import SequentialBuilder
 
 
-def _client() -> OpenAIChatClient:
-    return OpenAIChatClient(
+def _client() -> OpenAIChatCompletionClient:
+    return OpenAIChatCompletionClient(
         model=os.environ["MODEL_NAME"],
         azure_endpoint=os.environ["APIM_URL"],
         api_version="2024-10-21",
@@ -281,25 +348,32 @@ def _client() -> OpenAIChatClient:
     )
 
 
-triage = _client().create_agent(name="Triage", instructions="Classify ...")
-specialist = _client().create_agent(name="Specialist", instructions="Draft a reply ...")
-compliance = _client().create_agent(name="Compliance", instructions="Redact PII ...")
+client = _client()
+triage = Agent(client=client, name="Triage", instructions="Classify ...")
+specialist = Agent(client=client, name="Specialist", instructions="Draft a reply ...")
+compliance = Agent(client=client, name="Compliance", instructions="Redact PII ...")
 
 # Cleanest path — three agents in a straight pipeline.
 sequential = SequentialBuilder(
-    participants=[triage, specialist, compliance]
+    participants=[triage, specialist, compliance],
 ).build()
 
 # Lower-level path with checkpointing for crash recovery.
 storage = FileCheckpointStorage(Path("./.checkpoints").resolve())
 checkpointed = (
-    WorkflowBuilder(start_executor=triage)
+    WorkflowBuilder(start_executor=triage, checkpoint_storage=storage)
     .add_edge(triage, specialist)
     .add_edge(specialist, compliance)
-    .with_checkpointing(storage)  # NOTE: with_checkpointing — not with_checkpoint_storage
     .build()
 )
 ```
+
+:::note 1.4.0 API change
+In earlier 1.0.0rc* builds you wrote `.with_checkpointing(storage)`
+fluently on `WorkflowBuilder`. From 1.4.0 the method is gone —
+`checkpoint_storage` is a constructor kwarg instead. The behaviour is
+the same; only the call site moves.
+:::
 
 Run it:
 

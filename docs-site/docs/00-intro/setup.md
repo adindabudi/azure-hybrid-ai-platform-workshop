@@ -340,7 +340,7 @@ Indonesia Central → Azure OpenAI in Southeast Asia → back to your laptop.
 ```bash
 curl -sS \
   "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
-  -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+  -H "api-key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
   -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"Reply in one short sentence."}]}' \
@@ -357,7 +357,7 @@ Windows 10 1803+:
 ```powershell
 $response = curl.exe -sS `
   "$env:APIM_GATEWAY_URL/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" `
-  -H "Ocp-Apim-Subscription-Key: $env:APIM_KEY" `
+  -H "api-key: $env:APIM_KEY" `
   -H "x-auth-mode: anonymous" `
   -H "Content-Type: application/json" `
   -d '{"messages":[{"role":"user","content":"Reply in one short sentence."}]}'
@@ -372,7 +372,7 @@ JSON so you don't need `ConvertFrom-Json`):
 $r = Invoke-RestMethod -Method Post `
   -Uri "$env:APIM_GATEWAY_URL/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" `
   -Headers @{
-    "Ocp-Apim-Subscription-Key" = $env:APIM_KEY
+    "api-key" = $env:APIM_KEY
     "x-auth-mode"               = "anonymous"
   } `
   -ContentType "application/json" `
@@ -465,8 +465,24 @@ during the workshop — it'll come up again in M2.
 
 ## Step 6 — Install the Python stack
 
-Every subsequent module uses the same pinned set of packages. Smoke-tested
-on Python 3.13 on May 10 2026.
+Every subsequent module uses the same pinned set of packages, declared
+once in [`requirements-workshop.txt`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/requirements-workshop.txt)
+at the repo root. Smoke-tested on Python 3.11, 3.12, and 3.13 on May 10 2026.
+
+:::warning Don't mix venvs and global installs
+If you ran `pip install agent-framework` in your global Python earlier
+(or in a different venv), `python` may pick up a stale wheel and you'll
+get cryptic `ImportError` from M4 onwards. Check before continuing:
+
+```bash
+# bash / zsh
+which python pip
+python -c "import sys, agent_framework; print(sys.executable); print(agent_framework.__file__)"
+```
+
+Both paths should point inside the venv you just activated. If they
+don't, deactivate, delete the venv, and recreate it from scratch.
+:::
 
 **Track A / B (bash):**
 
@@ -474,24 +490,7 @@ on Python 3.13 on May 10 2026.
 python -m venv .venv
 source .venv/bin/activate
 
-# 1) Core Agent Framework + Foundry connectors + LangChain trio +
-#    observability extensions.
-#    --pre is needed because microsoft-agents-a365-* and
-#    agent-framework-foundry-local are still in pre-release.
-#
-#    agent-framework-foundry  → cloud Foundry: FoundryChatClient / FoundryAgent (used in M4 Step 7)
-#    agent-framework-foundry-local → on-laptop runtime: FoundryLocalClient (M4 Step 4d)
-pip install --pre \
-  'agent-framework>=1.0.0,<2' \
-  'agent-framework-foundry' \
-  'agent-framework-foundry-local' \
-  'langchain==1.2.15' \
-  'langchain-core==1.2.31' \
-  'langchain-openai==1.1.14' \
-  'wrapt<2' \
-  'microsoft-agents-a365-observability-extensions-langchain' \
-  'microsoft-agents-a365-observability-extensions-agent-framework' \
-  'azure-monitor-opentelemetry'
+pip install --pre -r requirements-workshop.txt
 ```
 
 **Track C (PowerShell):**
@@ -503,23 +502,15 @@ python -m venv .venv
 # in the same session — does not require admin, only affects this PS process:
 #   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
-pip install --pre `
-  'agent-framework>=1.0.0,<2' `
-  'agent-framework-foundry' `
-  'agent-framework-foundry-local' `
-  'langchain==1.2.15' `
-  'langchain-core==1.2.31' `
-  'langchain-openai==1.1.14' `
-  'wrapt<2' `
-  'microsoft-agents-a365-observability-extensions-langchain' `
-  'microsoft-agents-a365-observability-extensions-agent-framework' `
-  'azure-monitor-opentelemetry'
+pip install --pre -r requirements-workshop.txt
 ```
 
 :::warning Pin the LangChain trio
+`requirements-workshop.txt` pins `langchain==1.2.15` /
+`langchain-core==1.2.31` / `langchain-openai==1.1.14` / `wrapt<2`.
 The A365 LangChain instrumentor breaks against `langchain-core >= 1.3.0a`
 with `wrap_function_wrapper() got an unexpected keyword argument 'module'`.
-The pins above are verified working.
+Leave the pins alone unless you've read the A365 changelog.
 :::
 
 ## Verify the install
@@ -527,25 +518,38 @@ The pins above are verified working.
 ```python
 from importlib.metadata import version
 import agent_framework
-from agent_framework.openai import OpenAIChatClient   # post-rc6 namespace
+from agent_framework import Agent
+from agent_framework.openai import OpenAIChatCompletionClient  # APIM uses chat-completions
 import microsoft_agents_a365.observability.core
 import microsoft_agents_a365.observability.extensions.langchain
 import microsoft_agents_a365.observability.extensions.agentframework
 import langchain
 print("agent-framework", version("agent-framework"))
 print("langchain", langchain.__version__)
-print("OpenAIChatClient module", OpenAIChatClient.__module__)
+print("client module", OpenAIChatCompletionClient.__module__)
+print("Agent module", Agent.__module__)
 ```
 
-**Expected output** — `agent-framework` may resolve to `1.0.0rc6+` or
-any `1.x` stable depending on what pip picked; the **import path** is
-what matters most for the rest of the workshop:
+**Expected output** — the version numbers must match
+[`requirements-workshop.txt`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/requirements-workshop.txt) exactly:
 
 ```
-agent-framework 1.0.0rc6
+agent-framework 1.4.0
 langchain 1.2.15
-OpenAIChatClient module agent_framework.openai
+client module agent_framework.openai
+Agent module agent_framework
 ```
+
+:::tip Why `OpenAIChatCompletionClient` and not `OpenAIChatClient`?
+`agent-framework` 1.4.0 split the OpenAI surface in two:
+`OpenAIChatClient` hits the OpenAI **Responses API** (`/v1/responses`)
+and `OpenAIChatCompletionClient` hits **chat completions**
+(`/v1/chat/completions`). The APIM Developer SKU in this workshop only
+imports the chat-completions ops from `azure-rest-api-specs`, so any
+call to `/responses` 404s at the gateway. Use the chat-completions
+client whenever APIM is in front of AOAI — which is everywhere in this
+workshop.
+:::
 
 ## Next
 

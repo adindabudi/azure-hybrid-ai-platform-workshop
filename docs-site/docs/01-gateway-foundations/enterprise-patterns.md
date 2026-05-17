@@ -238,43 +238,122 @@ response** can still echo or hallucinate PII (NIK, NPWP, account no.,
 PAN). Whatever your downstream loggers see, it's their problem to
 classify — unless you scrub at the gateway first.
 
-**Solution.** A chain of `<find-and-replace>` calls in `<outbound>`,
-tuned for Indonesian regulated identifiers:
+**The trap to avoid.** It's tempting to chain `<find-and-replace>`
+policies in `<outbound>` with regex-looking patterns. **Don't.** The
+APIM `find-and-replace` policy does **substring replacement, not
+regex** (per
+[MS Learn](https://learn.microsoft.com/azure/api-management/find-and-replace-policy):
+"finds a request or response substring and replaces it"). A pattern
+like `(?<![0-9])[0-9]{16}(?![0-9])` is searched as a literal string,
+matches nothing, and the gateway happily forwards every NIK in the
+completion while the policy *looks* safe in code review. Worst kind of
+safety bug.
+
+**Solution.** Push detection into a small **Presidio orchestrator**
+(`apps/presidio-pii`) running in the same AKS cluster. APIM does one
+`<send-request>` per response; Presidio runs analyze + anonymize in one
+shot and returns the redacted text.
+
+```mermaid
+flowchart LR
+  AOAI[AOAI completion] --> APIM[APIM outbound]
+  APIM -->|POST /redact| P[Presidio<br/>analyzer + anonymizer]
+  P --> R[Indonesian recognizers<br/>NIK / NPWP / phone / acct]
+  P --> S[spaCy NER<br/>PERSON / LOCATION / ORG]
+  P -.optional RemoteRecognizer.-> L[Azure AI Language<br/>PII container]
+  P --> APIM
+  APIM --> C[Caller — redacted]
+```
+
+**Two deployment modes (same image):**
+
+| Mode | What runs | When to pick |
+|---|---|---|
+| **A — Presidio only** *(workshop default)* | spaCy `en_core_web_lg` NER + Indonesian regex recognizers | No Azure AI Language entitlement / no extra container |
+| **B — Presidio + Azure AI Language container** | Mode A **plus** Language PII as a Presidio `RemoteRecognizer` | BFSI production track, you already have an S0 Language resource, you want enterprise-grade NER for `Person`/`Address`/`IBAN`/etc. |
+
+This is the [Microsoft-documented integration pattern](https://microsoft.github.io/presidio/samples/python/integrating_with_external_services)
+for combining Presidio with Azure AI Language. The orchestration layer
+gives you composition (custom Indo recognizers merged with Language
+hits in one pass), failover (Language outage → analyzer still returns
+Indo + spaCy hits), and decoupling (APIM only knows about one
+endpoint).
+
+**The policy.** [`policies/pii-mask-outbound.xml`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/blob/main/policies/pii-mask-outbound.xml)
+is one `<send-request>` wrapped in `<choose>` guards:
 
 ```xml
 <outbound>
-  <!-- 1. NIK / KTP — exact 16 digits -->
-  <find-and-replace from="(?<![0-9])[0-9]{16}(?![0-9])"
-                    to="[NIK-MASKED]" />
-  <!-- 2. NPWP — 15-digit format with separators -->
-  <find-and-replace from="(?<![0-9])[0-9]{2}\.[0-9]{3}\.[0-9]{3}\.[0-9]-[0-9]{3}\.[0-9]{3}(?![0-9])"
-                    to="[NPWP-MASKED]" />
-  <!-- 3. Bank account — 10–18 digit run -->
-  <find-and-replace from="(?<![0-9])[0-9]{10,18}(?![0-9])"
-                    to="[ACCT-MASKED]" />
-  <!-- 4. PAN / credit card -->
-  <find-and-replace from="(?<![0-9])(?:[0-9]{4}[ -]?){3}[0-9]{1,7}(?![0-9])"
-                    to="[PAN-MASKED]" />
-  <!-- 5. Indonesian phone -->
-  <find-and-replace from="(?:\+62|0)8[0-9]{8,11}" to="[PHONE-MASKED]" />
-  <!-- 6. Email -->
-  <find-and-replace from="[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
-                    to="[EMAIL-MASKED]" />
+  <choose>
+    <!-- only mask completed JSON chat completions, not 4xx/5xx, not streaming -->
+    <when condition="@(context.Response.StatusCode == 200
+                        && context.Response.Headers.GetValueOrDefault("Content-Type","").Contains("application/json"))">
+
+      <set-variable name="assistantText" value="@{ /* extract choices[].message.content */ }" />
+
+      <send-request mode="new" response-variable-name="redactResponse"
+                    timeout="5" ignore-error="true">
+        <set-url>http://presidio-pii.presidio.svc.cluster.local/redact</set-url>
+        <set-method>POST</set-method>
+        <set-header name="Content-Type" exists-action="override">
+          <value>application/json</value>
+        </set-header>
+        <set-body>@{
+          return new JObject(new JProperty("text",
+            (string)context.Variables["assistantText"])).ToString();
+        }</set-body>
+      </send-request>
+
+      <!-- swap the redacted text back into the body and tag the response -->
+      <set-body>@{ /* write redactResponse.text into choices[0].message.content */ }</set-body>
+      <set-header name="x-pii-redactor" exists-action="override">
+        <value>presidio</value>
+      </set-header>
+    </when>
+  </choose>
 </outbound>
 ```
 
-**Performance budget.** Each `<find-and-replace>` is O(n) on the
-response body and there's no compiled-regex cache, so keep the chain
-≤ 10 entries on the hot path. For deeper masking (Luhn-validated PAN,
-named-entity recognition), use a `<send-request>` to a dedicated
-masking microservice instead. Reference:
-[`find-and-replace`](https://learn.microsoft.com/azure/api-management/find-and-replace-policy).
+**Failure posture.** `ignore-error="true"` makes Presidio fail-OPEN —
+if Presidio is unreachable the original response goes through and
+`x-pii-redactor: unavailable` flags it for SIEM alerting. Flip to
+`false` if you require fail-CLOSED (gateway returns 502 when Presidio
+is down). The trade-off is availability vs. compliance posture; pick
+explicitly per regulator.
+
+**Performance budget.** One Presidio call per response, ≤ 50 ms p50 on
+a 500-token completion (spaCy NER dominates). Add `--language` Mode B
+and the round-trip becomes ≤ 80 ms p50. Run two Presidio replicas
+behind the cluster Service so a Pod restart doesn't blank the masking
+layer.
 
 **Apply with:**
 
 ```bash
+# 1. Build the Presidio image into the workshop ACR
+cd apps/presidio-pii && az acr build -r <acr> -t presidio-pii:latest .
+
+# 2. Deploy Presidio (Mode A — no Language container)
+kubectl apply -f apps/presidio-pii/deployment.yaml
+
+# 3. (Optional) Mode B — add Azure AI Language container + secret
+kubectl apply -f apps/language-pii-cpu/language-pii-cpu.yaml
+kubectl create secret generic language-pii -n presidio \
+  --from-literal=LANGUAGE_ENDPOINT=http://language-pii.language-pii.svc.cluster.local:5000 \
+  --from-literal=LANGUAGE_KEY=any-string-the-container-ignores-it
+kubectl rollout restart -n presidio deploy/presidio-pii
+
+# 4. Attach the policy
 ./scripts/apply-apim-policies.sh --with-pii-mask
 ```
+
+**References.**
+
+- [Presidio — Adding recognizers](https://microsoft.github.io/presidio/analyzer/adding_recognizers)
+- [Presidio sample — Integrating with external services](https://microsoft.github.io/presidio/samples/python/integrating_with_external_services)
+- [Azure AI Language — PII container](https://learn.microsoft.com/azure/ai-services/language-service/personally-identifiable-information/how-to/use-containers)
+- [APIM — `send-request` policy](https://learn.microsoft.com/azure/api-management/send-request-policy)
+- [APIM — `find-and-replace` policy](https://learn.microsoft.com/azure/api-management/find-and-replace-policy) (the substring-only policy this pattern explicitly avoids for PII)
 
 ## Pattern 6 — IP allow-list (BFSI branches / Express Route)
 

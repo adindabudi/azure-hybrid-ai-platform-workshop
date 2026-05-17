@@ -164,6 +164,14 @@ If you also need to re-seed the SA / SPC / Secret, re-run
 
 This is the boundary the workshop assumes. Apply policies and onboard
 backends yourself — see [Apply the AI-gateway policies](./apply-policies.md).
+The recommended one-shot is:
+
+```bash
+./scripts/apply-apim-policies.sh
+```
+
+It's idempotent — safe to re-run if you reset the workshop. Without
+this, attendees will hit `404` on every `curl` example in M1.2.
 
 ## Next
 

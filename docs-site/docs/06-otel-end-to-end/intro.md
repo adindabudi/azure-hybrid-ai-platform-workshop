@@ -50,10 +50,17 @@ The string has the form
 
 ## Step 1 — Instrument the agent
 
-Add the highlighted lines to the **top** of
-`apps/agent-complaint-triage/agent.py`:
+Add the highlighted lines to
+`apps/agent-complaint-triage/agent.py`, **after the existing
+`warnings.filterwarnings(...)` line** and **before** the
+`from agent_framework ...` imports. Order matters — the OTel SDK has to
+be configured before the agent framework loads, otherwise spans from
+the first request go unrecorded.
 
-```python {1-12}
+```python {1-14}
+import warnings
+warnings.filterwarnings("ignore", message=".*is experimental.*")
+
 from azure.monitor.opentelemetry import configure_azure_monitor
 from microsoft_agents_a365.observability.core import configure
 from microsoft_agents_a365.observability.extensions.agentframework import (
@@ -72,7 +79,8 @@ AgentFrameworkInstrumentor().instrument()
 # ----- everything below is unchanged -----
 import asyncio
 import os
-from agent_framework.openai import OpenAIChatClient
+from agent_framework import Agent
+from agent_framework.openai import OpenAIChatCompletionClient  # APIM = chat completions
 ...
 ```
 
@@ -85,7 +93,7 @@ python apps/agent-complaint-triage/agent.py
 Within ~60 seconds, **Application Insights → Transaction search** shows
 a new trace with two spans:
 
-- `ChatAgent.run` (root) — your agent
+- `Agent.run` (root) — your agent
 - `chat.completions.create` (child) — the LLM call with full
   `gen_ai.*` semantic-convention attributes
 
@@ -158,7 +166,7 @@ LLM — through the workshop gateway:
 ```bash
 curl -sS \
   "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
-  -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+  -H "api-key: ${APIM_KEY}" \
   -H "Content-Type: application/json" \
   -H "x-trace-from: workshop" \
   -d '{"messages":[{"role":"user","content":"My card was swallowed at the ATM."}]}' \

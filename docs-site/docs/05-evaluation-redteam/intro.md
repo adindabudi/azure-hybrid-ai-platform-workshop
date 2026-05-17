@@ -5,6 +5,45 @@ sidebar_position: 1
 
 # M5 — Reproducible evaluation, gated on PR
 
+:::caution Region check — read this before you start
+The **AI Red Teaming Agent in cloud mode** is region-restricted. Cloud
+scans only work if your Foundry project lives in:
+
+- **East US 2**
+- **France Central**
+- **Sweden Central**
+- **Switzerland West**
+- **US North Central**
+
+This workshop runs in **Indonesia Central** for cost and data-residency
+reasons, so Step 4 below uses **local PyRIT mode** instead. If you fork
+this lab and want cloud red-teaming, redeploy the eval-only slice
+(no APIM / no AKS) to one of the regions above and point `redteam.py`
+at it. The `azure-ai-evaluation` SDK itself works everywhere — only the
+**cloud** red-team service is region-locked.
+
+The five Foundry-style **evaluators** in Step 2
+(`IntentResolution`, `ToolCallAccuracy`, `TaskAdherence`,
+`Relevance`, `Groundedness`) run anywhere — they only need an LLM
+judge endpoint.
+:::
+
+:::tip Why PyRIT — and why it ends up in your CI
+**PyRIT** ([Python Risk Identification Toolkit](https://azure.github.io/PyRIT/))
+is Apache-2.0 open source, built and maintained by the **Microsoft AI
+Red Team**. The Cloud Security Benchmark recommendation
+[MCSB AI-3 — Adopt safety meta-prompts](https://learn.microsoft.com/security/benchmark/azure/mcsb-v2-artificial-intelligence-security#ai-3-adopt-safety-meta-prompts)
+calls it out by name as the tool for adversarial regression testing.
+
+That matters because the assurance question regulators ask is no
+longer *"did your AI behave on launch day?"* — it's *"how do you know
+it still behaves three releases later?"* The pattern this workshop
+implements (Foundry evaluators + PyRIT + GitHub Actions PR gate) is
+the runtime version of that answer: every PR runs the same adversarial
+battery, regressions block the merge, and the run artifacts are
+retained as evidence.
+:::
+
 ## What you will accomplish
 
 In this 45-minute module you will:

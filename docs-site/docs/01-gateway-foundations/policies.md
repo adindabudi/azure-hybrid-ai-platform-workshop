@@ -35,12 +35,25 @@ Microsoft Learn reference.
 Admins setting this up themselves: see the
 [Facilitator Guide](../90-facilitator-guide/apply-policies.md).
 
+:::warning Common mistakes — read once, save 20 minutes
+If any `curl` in this module returns one of these, the cause is almost
+always the same five things. Check these before deep-debugging:
+
+| Symptom                                        | Likely cause                                                                                                  |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `401 invalid subscription key`                 | Your subscription key wasn't linked to the `openai` API in the product. Re-run `scripts/apply-apim-policies.sh` — it now links every `attendee-*` product. |
+| `404 Resource not found`                       | You hit `/responses` (Responses API) instead of `/openai/deployments/.../chat/completions`. APIM Developer only imports chat-completions. |
+| `500 Backend with id 'content-safety-sea' could not be found` | The base policy bundle references the Content Safety backend. Either re-apply policies with `--with-content-safety`, or run `apply-apim-policies.sh` without the flag (it strips the block automatically). |
+| `502 Bad Gateway` on `MODEL_TIER=cheap`        | The `slm-phi4` service isn't deployed in your namespace, or its LoadBalancer doesn't have an IP yet. `kubectl get svc slm-phi4 -n slm`. |
+| Metrics never show up in App Insights          | The `applicationinsights` diagnostic on the `openai` API wasn't created. Re-run `scripts/apply-apim-policies.sh` step 6 — it uses `az rest` now, not the removed `az apim logger list`. |
+:::
+
 ## Step 1 — Read the token-limit policy
 
 ```xml
 <llm-token-limit
     counter-key="@(context.Subscription.Id)"
-    tokens-per-minute="500"
+    tokens-per-minute="5000"
     estimate-prompt-tokens="false"
     tokens-consumed-header-name="x-tokens-consumed"
     remaining-tokens-header-name="x-tokens-remaining" />
@@ -50,18 +63,27 @@ What each attribute does:
 
 - `counter-key` — what to bucket by. `context.Subscription.Id` means
   each attendee key gets its own quota.
-- `tokens-per-minute="500"` — sliding-window budget per counter key.
+- `tokens-per-minute="5000"` — sliding-window budget per counter key.
 - `estimate-prompt-tokens="false"` — don't pre-charge; count the actual
   response. Faster, less accurate at edge.
 - `tokens-*-header-name` — APIM injects these response headers so
   callers can self-throttle.
+
+:::tip Workshop value vs production value
+The workshop ships at **5000 TPM per attendee** so a single attendee can run a
+full multi-evaluator pass in M5 without self-throttling. **Production should
+sit closer to 500–1000 TPM per consumer subscription**, paired with
+`quota-by-key` for monthly budgets and a separate **PTU reservation** for
+latency-sensitive paths. The 5000 here is a deliberate workshop choice,
+documented in `policies/workshop-llm-policy.xml`.
+:::
 
 ### Verify with curl
 
 ```bash
 curl -sS -i \
   "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
-  -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+  -H "api-key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
   -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"Say hi."}]}' \
@@ -72,16 +94,17 @@ curl -sS -i \
 
 ```
 x-tokens-consumed: 18
-x-tokens-remaining: 482
+x-tokens-remaining: 4982
 ```
 
-To trigger the **429**, hit the gateway in a loop:
+To trigger the **429**, hit the gateway in a loop (the workshop budget is
+5000 TPM, so you need a few dozen larger prompts to exhaust it):
 
 ```bash
 for i in $(seq 1 30); do
   curl -sS -o /dev/null -w "%{http_code}\n" \
     "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
-    -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+    -H "api-key: ${APIM_KEY}" \
     -H "x-auth-mode: anonymous" \
     -H "Content-Type: application/json" \
     -d '{"messages":[{"role":"user","content":"Write a 200-word essay."}]}'
@@ -93,7 +116,7 @@ exhausted. Wait one minute — the window slides, and you can send again.
 
 :::note Classic vs v2 algorithm
 APIM **Classic** uses a sliding-window algorithm; **v2 tiers** use a
-token-bucket. The same `tokens-per-minute=500` setting behaves slightly
+token-bucket. The same `tokens-per-minute=5000` setting behaves slightly
 differently across tiers — useful to know when a customer asks why their
 numbers don't match
 ([source](https://learn.microsoft.com/azure/api-management/llm-token-limit-policy)).
@@ -141,7 +164,7 @@ prompt='{"messages":[{"role":"user","content":"What is the capital of Indonesia?
 # First call — populates the cache
 time curl -sS -o /dev/null \
   "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
-  -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+  -H "api-key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
   -H "Content-Type: application/json" \
   -d "$prompt"
@@ -149,7 +172,7 @@ time curl -sS -o /dev/null \
 # Second call — should hit the cache
 time curl -sS -o /dev/null \
   "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
-  -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+  -H "api-key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
   -H "Content-Type: application/json" \
   -d "$prompt"
@@ -187,7 +210,7 @@ managed AOAI in Singapore.
 # Premium tier → AOAI
 curl -sS \
   "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
-  -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+  -H "api-key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
   -H "x-model-tier: premium" \
   -H "Content-Type: application/json" \
@@ -197,7 +220,7 @@ curl -sS \
 # Cheap tier → self-hosted Phi-4
 curl -sS \
   "${APIM_GATEWAY_URL}/openai/deployments/gpt-5-mini/chat/completions?api-version=2024-10-21" \
-  -H "Ocp-Apim-Subscription-Key: ${APIM_KEY}" \
+  -H "api-key: ${APIM_KEY}" \
   -H "x-auth-mode: anonymous" \
   -H "x-model-tier: cheap" \
   -H "Content-Type: application/json" \

@@ -24,6 +24,74 @@ If you completed M0–M6, you now have:
 That's the entire shape of a production AI platform. The rest of the
 journey is hardening.
 
+## Crawl-Walk-Run adoption plan {#crawl-walk-run-adoption-plan}
+
+If today's lab is the *complete* picture, your Monday-morning rollout
+should be the *first 5%*. The progression below mirrors how Azure
+customers in Indonesia have actually moved from "AI proof-of-concept"
+to "regulated AI platform" — with each step adding one or two policies
+and one or two organisational habits, not a re-platform.
+
+### Crawl (week 1–4) — one team, observability first
+
+**Goal**: ship one internal AI use case behind APIM, with cost and
+token telemetry visible from day one.
+
+- Stand up APIM (Developer or Premium-classic) + 1 Azure OpenAI
+  deployment in your primary region.
+- Apply only **two** policies from this workshop:
+  - `llm-emit-token-metric` ([M2 Step 1](../02-finops-observability-security/intro.md))
+  - `validate-jwt` ([M2 Step 3](../02-finops-observability-security/intro.md))
+- One App Registration for one consumer team. One subscription key.
+- One App Insights workbook with the three KQL tiles from M2 Step 2.
+
+**Outcome**: you can answer *"what did AI cost us this week and who
+spent it?"* before you talk about adding a second team.
+
+### Walk (month 2–3) — multi-team, safety in line
+
+**Goal**: open the platform to 3–5 teams without losing per-team
+control, and put runtime safety in the request path.
+
+- Add `llm-token-limit` + `llm-semantic-cache-lookup` /
+  `-store` ([M1.2–M1.3](../01-gateway-foundations/policies.md)).
+- Add `llm-content-safety` with Prompt Shields ([M2 Step 4](../02-finops-observability-security/intro.md)).
+- One **APIM product per consumer team**; per-product subscription
+  keys. Each team gets its own chargeback row in the KQL tile.
+- Wire Defender for Cloud — AI threat protection (cloud regions only).
+- First MAF agent + Foundry evaluators in CI ([M4](../04-agent-framework/intro.md) + [M5](../05-evaluation-redteam/intro.md)).
+
+**Outcome**: a CISO can read the runtime safety story end-to-end; a
+finance partner can read the chargeback story end-to-end; an engineer
+can ship a new agent without a security review per release.
+
+### Run (month 4–6) — regulated workloads, residency, regression discipline
+
+**Goal**: pass a real OJK / Permenkes / BI audit and run AI as a
+regulated platform service, not as a side project.
+
+- Add `circuit-breaker-aoai`, `load-balancer-priority`, and the
+  dual-region (IDC + SEA) routing with `x-data-classification`
+  ([M1.4](../01-gateway-foundations/enterprise-patterns.md)).
+- Turn on `audit-trail-eventhub` → ADLS Gen2 with immutable storage
+  for 7-year retention.
+- Add `quota-by-key-monthly` per consumer team.
+- Wire the PyRIT scan into the release-tag pipeline; treat any new
+  bypass as a release blocker, not a finding.
+- Stand up MCP-fronted tools for any agent that touches systems of
+  record ([M3](../03-mcp-secure-tool-access/intro.md)).
+- Quarterly PTU-vs-PAYG review using the KQL in
+  [M2 Step 4.5](../02-finops-observability-security/intro.md#step-45--cost-discipline-turning-the-gateway-into-a-finops-control).
+
+**Outcome**: AI is now a regulated platform service. The auditor
+question — *"for every decision, show me the prompt, the version, the
+retrieved data, and who called it"* — has a documented, automated
+answer.
+
+The full set of policies in [`policies/`](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop/tree/main/policies)
+and the [industry playbooks](../90-industry-playbooks/index.md)
+expand each Run-phase item into a concrete artefact.
+
 ## Production hardening checklist
 
 Use this in your first production design review. Each item is a real
@@ -100,24 +168,53 @@ You don't have to rewrite. Three options, in order of effort:
    and front the existing chain with APIM. You get observability and
    gateway policies; the chain code is untouched.
 2. **Replace the LLM client only** — keep your LangGraph state machine,
-   swap the LLM client for an `OpenAIChatClient` pointed at APIM. You
-   gain backend portability (AOAI / SLM / LiteLLM) without rewriting
-   the orchestration.
+   swap the LLM client for an `OpenAIChatCompletionClient` pointed at
+   APIM. You gain backend portability (AOAI / SLM / LiteLLM) without
+   rewriting the orchestration. (Use the **chat-completion** client,
+   not `OpenAIChatClient` — APIM imports only the chat-completions
+   surface of the AOAI OpenAPI spec.)
 3. **Full rewrite to MAF Workflow** — only when you need typed graphs,
    checkpointing, .NET parity, or the Foundry Hosted runtime.
 
-## Tear-down
+## Tear-down — do this today if you're self-paced
+
+:::danger Stop the meter
+The workshop stack costs **~USD 6–9 per hour** while idle, dominated by
+APIM Developer SKU (~USD 0.07/h), AKS system pool + 1× A10 GPU node
+(~USD 1.20/h when running), AOAI provisioned tokens, and the App
+Insights workspace. A weekend left running = USD 200+ on your bill.
+
+Run `terraform destroy` **the same day** you finish the lab — do not
+"come back to it tomorrow". If you're a facilitator running for an
+attendee cohort, schedule a calendar reminder for 18:00 local on the
+workshop day.
+:::
 
 To return the workshop subscription to a clean state:
 
 ```bash
-cd hybrid-ai-platform-workshop/infra
+cd azure-hybrid-ai-platform-workshop/infra
 terraform destroy -var-file=env/workshop.tfvars
 ```
 
 This removes all 90+ resources except the resource group itself
 (which was created out-of-band on purpose). The destroy completes in
-~15 minutes; APIM Developer is the long pole.
+~15 minutes; APIM Developer is the long pole — it stays in a
+`Deleting` state for ~10 minutes even after `terraform destroy`
+returns. If you re-run the workshop within 48 hours, you can usually
+`terraform apply` straight on top of the partial deletion and APIM
+will reuse the soft-deleted instance instead of waiting out the full
+purge window.
+
+Verify nothing is left:
+
+```bash
+az resource list -g rg-aigw-workshop --query "[].{name:name, type:type}" -o table
+# Expect: empty (or just lingering APIM in Deleting state)
+```
+
+If anything other than APIM remains, delete it manually before closing
+the laptop.
 
 ## Take it further
 
