@@ -18,25 +18,20 @@ If you are an attendee, ignore this section and start at
 
 ## End-to-end flow
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│   T-1 day                                                        │
-├──────────────────────────────────────────────────────────────────┤
-│ 1. Provision the landing zone (~30 min, terraform apply)         │
-│    → ./facilitator-guide/provision                                │
-│                                                                  │
-│ 2. Bootstrap per-attendee namespaces, RBAC, secrets              │
-│    → ./facilitator-guide/attendees                                │
-│                                                                  │
-│ 3. Apply the APIM AI-gateway policies                            │
-│    → ./facilitator-guide/apply-policies                           │
-│    (single command: `./scripts/apply-apim-policies.sh`)          │
-├──────────────────────────────────────────────────────────────────┤
-│   Workshop morning                                               │
-├──────────────────────────────────────────────────────────────────┤
-│ 4. Run smoke-test, then print and hand out the per-attendee slip │
-│    → ./facilitator-guide/attendees                                │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph T1["T-1 day"]
+        direction TB
+        S1["1. Provision the landing zone<br/>(~30 min, terraform apply)<br/>→ ./facilitator-guide/provision"]
+        S2["2. Bootstrap per-attendee namespaces,<br/>RBAC, secrets<br/>→ ./facilitator-guide/attendees"]
+        S3["3. Apply the APIM AI-gateway policies<br/>→ ./facilitator-guide/apply-policies<br/><i>(single command: ./scripts/apply-apim-policies.sh)</i>"]
+        S1 --> S2 --> S3
+    end
+    subgraph WM["Workshop morning"]
+        direction TB
+        S4["4. Run smoke-test, then print and<br/>hand out the per-attendee slip<br/>→ ./facilitator-guide/attendees"]
+    end
+    T1 ==> WM
 ```
 
 Each attendee then follows [M0 — Setup](../00-intro/setup.md) using the slip

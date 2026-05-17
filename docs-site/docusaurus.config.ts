@@ -23,6 +23,12 @@ const config: Config = {
     locales: ['en'],
   },
 
+  markdown: {
+    mermaid: true,
+  },
+
+  themes: ['@docusaurus/theme-mermaid'],
+
   presets: [
     [
       'classic',
@@ -77,9 +83,9 @@ const config: Config = {
         {
           title: 'References',
           items: [
-            { label: 'APIM AI Gateway', href: 'https://learn.microsoft.com/azure/api-management/genai-gateway-capabilities' },
-            { label: 'Azure CNI Cilium', href: 'https://learn.microsoft.com/azure/aks/azure-cni-powered-by-cilium' },
-            { label: 'Foundry Agent Service', href: 'https://learn.microsoft.com/azure/foundry/agents/' },
+            { label: 'AI Landing Zone for APIM', href: 'https://aka.ms/ai-hub-gateway' },
+            { label: 'AI Landing Zone for Foundry', href: 'https://github.com/Azure/AI-Landing-Zones' },
+            { label: 'Microsoft Agent Framework', href: 'https://github.com/microsoft/agent-framework' },
           ],
         },
       ],

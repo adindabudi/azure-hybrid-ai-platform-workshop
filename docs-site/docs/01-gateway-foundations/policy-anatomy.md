@@ -84,12 +84,12 @@ in `<outbound>` to get the token counts.
 The same XML can be applied at five levels. Each level **inherits** the
 one above via `<base />`.
 
-```
-Global
-  └─ Workspace        (Premium / v2 only)
-       └─ Product
-            └─ API
-                 └─ Operation
+```mermaid
+flowchart TB
+    Global --> Workspace["Workspace<br/><i>(Premium / v2 only)</i>"]
+    Workspace --> Product
+    Product --> API
+    API --> Operation
 ```
 
 | Scope | Right for | Workshop example |

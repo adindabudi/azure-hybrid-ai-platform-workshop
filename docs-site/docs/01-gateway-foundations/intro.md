@@ -25,10 +25,9 @@ is **M1.0 (this page) → [M1.1 anatomy](./policy-anatomy) →
 
 **Before — direct SDK access:**
 
-```
-┌────────────┐         ┌──────────────┐
-│ App / Bot  │────────▶│ Azure OpenAI │
-└────────────┘         └──────────────┘
+```mermaid
+flowchart LR
+    App["App / Bot"] --> AOAI["Azure OpenAI"]
 ```
 
 Every concern — auth, rate limits, content scanning, cost tracking,
@@ -37,19 +36,12 @@ If you have 30 applications, you have 30 copies of that logic.
 
 **After — gateway-fronted:**
 
-```
-┌────────────┐    ┌─────────┐    ┌──────────────┐
-│ App / Bot  │───▶│  APIM   │───▶│ Azure OpenAI │
-└────────────┘    │         │    └──────────────┘
-                  │         │    ┌──────────────┐
-                  │         │───▶│ Self-hosted  │
-                  │         │    │  SLM on AKS  │
-                  └─────────┘    └──────────────┘
-                       │
-                       ▼
-                  ┌─────────┐
-                  │ App Ins │
-                  └─────────┘
+```mermaid
+flowchart LR
+    App["App / Bot"] --> APIM[APIM]
+    APIM --> AOAI["Azure OpenAI"]
+    APIM --> SLM["Self-hosted<br/>SLM on AKS"]
+    APIM -.->|telemetry| AppIns["App Insights"]
 ```
 
 Cross-cutting concerns move into APIM as policies, applications shrink to

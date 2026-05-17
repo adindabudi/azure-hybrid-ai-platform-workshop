@@ -16,18 +16,19 @@ In this 45-minute module you will:
 
 ## How the trace flows
 
-```
-laptop  →  APIM   →  Agent pod    →  MCP server   →  LLM backend
-  │         │           │                │                │
-  └── client span       └── agent span   └── tool span    └── llm span
-              \                 │                │
-               \                ▼                ▼
-                \────────► Application Insights (also OTLP-compatible)
-                 \
-                  └──► OTLP collector (optional)
-                            │
-                            ▼
-                       Aspire Dashboard / Grafana Tempo / Datadog / Splunk
+```mermaid
+flowchart LR
+    subgraph Hops["Request path — each hop emits a span (same trace_id)"]
+        direction LR
+        L[laptop] -->|client span| A[APIM]
+        A -->|gateway span| G["Agent pod"]
+        G -->|agent span| M["MCP server"]
+        M -->|tool span| B["LLM backend"]
+    end
+
+    Hops -.->|spans| AI[("Application Insights<br/>also OTLP-compatible")]
+    Hops -.->|spans| OTLP["OTLP collector<br/><i>(optional)</i>"]
+    OTLP --> Backends["Aspire Dashboard /<br/>Grafana Tempo /<br/>Datadog / Splunk"]
 ```
 
 Every hop emits a span with the same `trace_id`. App Insights stitches
@@ -176,12 +177,13 @@ curl -sS \
 In **Application Insights → Transaction search**, filter by
 `x-trace-from: workshop` to find your trace. You should see:
 
-```
-APIM gateway request   200 ms
-└── llm-token-limit policy           1 ms
-└── llm-semantic-cache-lookup        15 ms
-└── llm-emit-token-metric            0 ms
-└── backend: aoai-sea/openai/...    180 ms
+```mermaid
+flowchart TB
+    Root["APIM gateway request — 200 ms"]
+    Root --> P1["llm-token-limit policy — 1 ms"]
+    Root --> P2["llm-semantic-cache-lookup — 15 ms"]
+    Root --> P3["llm-emit-token-metric — 0 ms"]
+    Root --> P4["backend: aoai-sea/openai/... — 180 ms"]
 ```
 
 If your agent script triggered the request, you'll see an additional

@@ -79,33 +79,38 @@ with your target region and the architecture decisions carry over.
 
 ## Two architectures, side by side
 
-```
-  WORKSHOP / DEV (Azure today)                ON-PREM / IN-COUNTRY PROD (target)
-  ┌─── Indonesia Central ──────────────────┐   ┌─── Customer DC / Azure IDC ────────┐
-  │ APIM Developer (classic)               │   │ APIM Premium classic OR            │
-  │   • llm-token-limit                    │   │  APIM self-hosted gateway          │
-  │   • llm-emit-token-metric              │   │  on customer AKS                   │
-  │   • llm-semantic-cache-lookup/store    │   │                                    │
-  │   • llm-content-safety (cloud)         │   │ AKS — Cilium + Azure Linux         │
-  │   • load-balancer with priority groups │   │  ├── Agent (MAF .NET / Python)     │
-  │                                        │   │  ├── MCP server pods               │
-  │ AKS — Cilium + Azure Linux             │   │  ├── Self-hosted SLM on GPU        │
-  │  ├── Agent (MAF Python 1.3 GA)         │   │  ├── Content Safety on GPU         │
-  │  ├── MCP server                        │   │  └── KV CSI secrets                │
-  │  ├── Self-hosted SLM (Phi-4-mini, CPU) │   │                                    │
-  │  ├── Content Safety container (CPU)    │   │ AI Search Basic OR Cosmos+rerank   │
-  │  └── KV CSI secrets                    │   │   OR on-prem pgvector              │
-  │                                        │   └────────────────────────────────────┘
-  │ AI Search Basic, Cosmos, KV, App Ins.  │                ▲
-  └────────────────────────────────────────┘                │
-           │                                        (managed cloud AOAI does NOT
-           │ (cross-region, dev only)                carry to on-prem prod)
-           ▼
-  ┌─── Southeast Asia (Singapore) ────────┐
-  │ AOAI (gpt-5-mini, embedding-3-large)  │
-  │ Foundry Hosted Agents (Preview)       │
-  │ Content Safety API                    │
-  └───────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph WS["WORKSHOP / DEV — Indonesia Central (Azure today)"]
+        direction TB
+        APIM_W["APIM Developer (classic)<br/>• llm-token-limit<br/>• llm-emit-token-metric<br/>• llm-semantic-cache-lookup/store<br/>• llm-content-safety (cloud)<br/>• load-balancer with priority groups"]
+        AKS_W["AKS — Cilium + Azure Linux<br/>• Agent (MAF Python 1.3 GA)<br/>• MCP server<br/>• Self-hosted SLM (Phi-4-mini, CPU)<br/>• Content Safety container (CPU)<br/>• KV CSI secrets"]
+        DATA_W["AI Search Basic · Cosmos · KV · App Insights"]
+        APIM_W --- AKS_W --- DATA_W
+    end
+
+    subgraph PROD["ON-PREM / IN-COUNTRY PROD — Customer DC / Azure IDC (target)"]
+        direction TB
+        APIM_P["APIM Premium classic<br/><i>OR</i><br/>APIM self-hosted gateway<br/>on customer AKS"]
+        AKS_P["AKS — Cilium + Azure Linux<br/>• Agent (MAF .NET / Python)<br/>• MCP server pods<br/>• Self-hosted SLM on GPU<br/>• Content Safety on GPU<br/>• KV CSI secrets"]
+        DATA_P["AI Search Basic <i>OR</i> Cosmos+rerank<br/><i>OR</i> on-prem pgvector"]
+        APIM_P --- AKS_P --- DATA_P
+    end
+
+    subgraph SEA["Southeast Asia — Singapore"]
+        direction TB
+        AOAI["AOAI (gpt-5-mini, embedding-3-large)<br/>Foundry Hosted Agents (Preview)<br/>Content Safety API"]
+    end
+
+    WS -.->|cross-region, dev only| SEA
+    PROD x-.-x|managed cloud AOAI does NOT<br/>carry to on-prem prod| SEA
+
+    classDef dev fill:#e8f0fe,stroke:#4285f4,stroke-width:1px
+    classDef prod fill:#fef7e0,stroke:#f9ab00,stroke-width:1px
+    classDef sea fill:#e6f4ea,stroke:#34a853,stroke-width:1px
+    class WS dev
+    class PROD prod
+    class SEA sea
 ```
 
 ## How to use this site
