@@ -226,18 +226,117 @@ cleanly.
 
 ## Step 6 — Vendor-neutrality
 
-OpenTelemetry is open standard, not a Microsoft format. The same
-`OTLPSpanExporter` works against:
+> "No agent code changes" is the whole pitch of OpenTelemetry — but a
+> reader who has never swapped a backend can't picture what that
+> actually looks like. Here's the proof: one 3-line refactor, then five
+> real `.env` files.
 
-- [Grafana Tempo](https://grafana.com/oss/tempo/)
-- [Jaeger](https://www.jaegertracing.io/)
-- [Datadog APM](https://docs.datadoghq.com/tracing/)
-- [Splunk APM](https://docs.splunk.com/observability/en/apm/)
-- [New Relic](https://docs.newrelic.com/docs/opentelemetry/)
-- Elastic, Honeycomb, Lightstep, etc.
+### 6.1 — Make the endpoint env-driven (one-time, ~3 lines)
 
-To switch destinations: change the endpoint URL on the
-`OTLPSpanExporter`. No agent code changes.
+The OpenTelemetry SDK already auto-reads `OTEL_EXPORTER_OTLP_*`
+environment variables. Drop the hard-coded `endpoint="http://localhost:18889"`
+from Step 2 and let the exporter pick them up:
+
+```python title="agent.py — instrumentation block"
+from opentelemetry import trace
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+    OTLPSpanExporter,
+)
+
+# Reads OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_HEADERS,
+# OTEL_EXPORTER_OTLP_PROTOCOL, OTEL_EXPORTER_OTLP_INSECURE from env.
+trace.get_tracer_provider().add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter())
+)
+```
+
+That's it. Everything below is a `.env` swap.
+
+### 6.2 — Five drop-in destinations
+
+Pick the file that matches your destination, `source` it, restart the
+agent. No re-deploy, no rebuild.
+
+```bash title=".env.aspire (local OSS — what you ran in Step 2)"
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:18889
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_EXPORTER_OTLP_INSECURE=true
+```
+
+```bash title=".env.tempo (Grafana Tempo, self-hosted on AKS)"
+OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo.observability.svc.cluster.local:4317
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_EXPORTER_OTLP_INSECURE=true   # TLS terminates at the AKS ingress
+```
+
+```bash title=".env.jaeger (Jaeger all-in-one, dev cluster)"
+OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger-collector.observability.svc.cluster.local:4317
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_EXPORTER_OTLP_INSECURE=true
+```
+
+```bash title=".env.honeycomb (Honeycomb SaaS — native OTLP)"
+OTEL_EXPORTER_OTLP_ENDPOINT=https://api.honeycomb.io:443
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_EXPORTER_OTLP_HEADERS=x-honeycomb-team=${HONEYCOMB_API_KEY}
+```
+
+```bash title=".env.newrelic (New Relic SaaS — native OTLP)"
+OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp.nr-data.net:4317
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_EXPORTER_OTLP_HEADERS=api-key=${NEW_RELIC_LICENSE_KEY}
+```
+
+```bash title=".env.datadog (Datadog Agent OTLP receiver, sidecar)"
+# The Datadog Agent (DaemonSet on AKS, or sidecar) enables an OTLP
+# receiver via DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT=0.0.0.0:4317
+# and forwards to Datadog using its own DD_API_KEY env var — no auth
+# headers needed from your agent.
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_EXPORTER_OTLP_INSECURE=true
+```
+
+Splunk, Elastic, and Lightstep all follow the same pattern: an HTTPS
+endpoint plus a per-vendor header in `OTEL_EXPORTER_OTLP_HEADERS`. Check
+each vendor's OTLP page for the exact header name.
+
+### 6.3 — Dual-export (App Insights *and* a third party at the same time)
+
+`add_span_processor` is additive, so you can fan-out the same trace
+without choosing a winner. Useful during a migration:
+
+```python title="agent.py — dual-export"
+from azure.monitor.opentelemetry import configure_azure_monitor
+from opentelemetry import trace
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+    OTLPSpanExporter,
+)
+
+configure_azure_monitor()  # App Insights, reads APPLICATIONINSIGHTS_CONNECTION_STRING
+trace.get_tracer_provider().add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter(
+        endpoint="https://api.honeycomb.io:443",
+        headers={"x-honeycomb-team": os.environ["HONEYCOMB_API_KEY"]},
+    ))
+)
+```
+
+The same `trace_id` lands in both backends, so you can compare query
+ergonomics side-by-side before cutting over.
+
+### 6.4 — Three gotchas to call out
+
+| Gotcha | Symptom | Fix |
+| --- | --- | --- |
+| gRPC vs HTTP/proto port mismatch | `Failed to export batch... DEADLINE_EXCEEDED` | Pick **one**: gRPC on `:4317` (`grpc` package, `_grpc.trace_exporter`) or HTTP/proto on `:4318` (`_http.trace_exporter`). Don't mix. |
+| `insecure=true` against TLS endpoint | `transport: authentication handshake failed` | Drop `OTEL_EXPORTER_OTLP_INSECURE=true` for any `https://` endpoint. |
+| `OTEL_EXPORTER_OTLP_HEADERS` parsed as JSON | Auth silently fails, traces 401 at the vendor | Format is **comma-separated `key=value`**, not JSON. Example: `key1=v1,key2=v2`. |
+
+The pitch holds: the agent code from Step 2 is unchanged across all five
+destinations above. The only thing that moves is the `.env` file.
 
 ## What you just built
 
