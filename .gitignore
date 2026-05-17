@@ -54,6 +54,21 @@ venv/
 .pytest_cache/
 
 # -----------------------------------------------------------------------------
+# Workshop runtime artefacts — regenerated on every run, never commit.
+# -----------------------------------------------------------------------------
+# Agent Framework `FileCheckpointStorage` output (pickled workflow state).
+.checkpoints/
+# Output of `apps/eval-suite/run_foundry_evals.py`.
+apps/eval-suite/eval-results.json
+
+# -----------------------------------------------------------------------------
+# Per-run facilitator working notes (personal, dated, not part of the workshop).
+# -----------------------------------------------------------------------------
+lessons.md
+progress.md
+tasks/
+
+# -----------------------------------------------------------------------------
 # Editor / OS
 # -----------------------------------------------------------------------------
 .vscode/
