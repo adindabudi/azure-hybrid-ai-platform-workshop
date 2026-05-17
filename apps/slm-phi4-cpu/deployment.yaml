@@ -1,0 +1,176 @@
+# Namespace owned by this manifest so it can be deployed standalone with
+# `kubectl apply -f`.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: slm
+  labels:
+    purpose: hybrid-ai-platform-workshop
+    workload: phi4-mini-cpu
+---
+# Persistent cache for the pulled GGUF model blobs (~2.5 GB for phi4-mini).
+# Without this, every pod restart triggers a fresh ~3 minute download.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: slm-phi4-models
+  namespace: slm
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  # Uses the AKS default storage class (managed-csi). No need to set
+  # storageClassName explicitly — that lets the same manifest work on
+  # other clusters that name the default class differently.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: slm-phi4
+  namespace: slm
+  labels:
+    app: slm-phi4
+spec:
+  replicas: 1
+  # Recreate (not RollingUpdate) because we use a single RWO PVC for the
+  # model cache — two pods can't mount it simultaneously.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: slm-phi4
+  template:
+    metadata:
+      labels:
+        app: slm-phi4
+    spec:
+      # amd64-only image. AKS Cilium overlay carries amd64 nodes.
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      # The initContainer warms the model cache so the first user request
+      # doesn't time out waiting for a ~2.5 GB GGUF pull. Once cached, the
+      # main container starts in seconds.
+      initContainers:
+        - name: ollama-warm-model
+          image: docker.io/ollama/ollama:0.5.13
+          imagePullPolicy: IfNotPresent
+          # Start ollama serve in the background, wait for the API to be
+          # ready, then pull the model. The init container exits once the
+          # blob is on disk under /root/.ollama (= the PVC mount).
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              ollama serve > /tmp/ollama-warm.log 2>&1 &
+              for i in $(seq 1 30); do
+                if ollama list >/dev/null 2>&1; then
+                  break
+                fi
+                sleep 2
+              done
+              ollama pull phi4-mini:3.8b
+          env:
+            - name: OLLAMA_HOST
+              value: 127.0.0.1:11434
+            - name: OLLAMA_MODELS
+              value: /root/.ollama/models
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+      containers:
+        - name: ollama
+          # Pinned: Phi-4-mini requires Ollama >= 0.5.13. We use the exact
+          # minimum so behavior is reproducible across the cohort.
+          image: docker.io/ollama/ollama:0.5.13
+          imagePullPolicy: IfNotPresent
+          ports:
+            # Ollama's OpenAI-compatible endpoint mounts at /v1/chat/completions
+            # on the same port as the native /api endpoints. We expose 8000
+            # (not Ollama's default 11434) so the APIM backend URL stays the
+            # same as scripts/apply-apim-policies.sh:
+            #   http://${SLM_IP}:8000/v1
+            - containerPort: 8000
+              name: http
+          env:
+            # Bind the listener to 0.0.0.0:8000 (override Ollama's default
+            # 127.0.0.1:11434) so the Service can reach it from another pod.
+            - name: OLLAMA_HOST
+              value: 0.0.0.0:8000
+            - name: OLLAMA_MODELS
+              value: /root/.ollama/models
+            # Keep the model loaded for 1h between requests — APIM token-
+            # budget bursts come in clumps, and reloading from disk for each
+            # is wasteful on CPU.
+            - name: OLLAMA_KEEP_ALIVE
+              value: 1h
+            # Single concurrent request — Phi-4-mini on CPU is the bottleneck;
+            # queuing avoids OOM under bursty traffic.
+            - name: OLLAMA_NUM_PARALLEL
+              value: "1"
+          resources:
+            # CPU inference of Phi-4-mini-instruct (3.8B params, Q4_K_M GGUF
+            # ~2.5 GB) needs at least 4 GB RAM headroom. Tested OK at 6 Gi.
+            # If your AKS node pool is small (Standard_D4s_v5), schedule one
+            # SLM pod per node and avoid co-tenanting with other heavy
+            # workloads.
+            requests:
+              cpu: 2000m
+              memory: 6Gi
+            limits:
+              cpu: 4000m
+              memory: 8Gi
+          readinessProbe:
+            httpGet:
+              # Ollama returns 200 on `GET /` with the string "Ollama is running".
+              path: /
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: slm-phi4-models
+---
+# Service named "slm-phi4" in namespace "slm" so that
+# scripts/apply-apim-policies.sh auto-discovers it via:
+#   kubectl get svc slm-phi4 -n slm -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+# and registers it as the APIM `slm-phi4` backend at http://${IP}:8000/v1.
+apiVersion: v1
+kind: Service
+metadata:
+  name: slm-phi4
+  namespace: slm
+  annotations:
+    # Internal LoadBalancer — APIM reaches this via VNet peering / private
+    # link, NOT the public internet. The internal LB IP is the value APIM
+    # registers as the backend URL.
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+spec:
+  type: LoadBalancer
+  selector:
+    app: slm-phi4
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http

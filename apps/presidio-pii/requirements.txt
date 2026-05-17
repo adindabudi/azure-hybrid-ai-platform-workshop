@@ -1,0 +1,7 @@
+presidio-analyzer==2.2.355
+presidio-anonymizer==2.2.355
+flask==3.0.3
+gunicorn==23.0.0
+requests==2.32.3
+# spaCy English model is downloaded in the Dockerfile (`python -m spacy download en_core_web_lg`)
+# rather than pinned here, because spaCy ships models out-of-band on PyPI.

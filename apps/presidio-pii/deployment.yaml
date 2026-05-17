@@ -1,0 +1,154 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: presidio
+---
+# OPTIONAL Secret. Create this only if you want Mode B (Presidio + Azure AI
+# Language). The Deployment below references envFrom this Secret with
+# `optional: true`, so the absence of the Secret is not a startup error —
+# Presidio simply falls back to Mode A.
+#
+# Mode B with the in-cluster Language container:
+#   kubectl create secret generic language-pii \
+#     -n presidio \
+#     --from-literal=LANGUAGE_ENDPOINT='http://language-pii.language-pii.svc.cluster.local:5000' \
+#     --from-literal=LANGUAGE_KEY='any-string-the-container-ignores-it'
+#
+# Mode B with cloud Azure AI Language:
+#   kubectl create secret generic language-pii \
+#     -n presidio \
+#     --from-literal=LANGUAGE_ENDPOINT='https://<your-language>.cognitiveservices.azure.com' \
+#     --from-literal=LANGUAGE_KEY='<az ai-services-key>'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: presidio-pii
+  namespace: presidio
+  labels:
+    app: presidio-pii
+spec:
+  # 2 replicas because the gateway calls /redact on every outbound response
+  # and a Pod restart should not blank the masking layer. Match this to your
+  # APIM call rate; spaCy NER is single-threaded inside one Python worker.
+  replicas: 2
+  selector:
+    matchLabels:
+      app: presidio-pii
+  template:
+    metadata:
+      labels:
+        app: presidio-pii
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      containers:
+        - name: presidio-pii
+          # Built locally with `az acr build -r <acr> -t presidio-pii:latest .`
+          # See apps/presidio-pii/README.md → "Build for the workshop ACR".
+          image: ${ACR_LOGIN_SERVER}/presidio-pii:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: LOG_LEVEL
+              value: INFO
+            # 64 KiB ceiling per /redact call. AOAI completions are well
+            # under this; raise only if you stream long-form responses
+            # (legal docs, multi-page summaries) through the gateway.
+            - name: MAX_TEXT_BYTES
+              value: "65536"
+            # Confidence threshold for accepting Azure AI Language hits.
+            # Default 0.5 keeps the false-positive rate manageable.
+            - name: LANGUAGE_MIN_CONFIDENCE
+              value: "0.5"
+          envFrom:
+            # Optional Secret — see comment above. `optional: true` means
+            # the Pod still starts when the Secret is absent (Mode A).
+            - secretRef:
+                name: language-pii
+                optional: true
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 1500m
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            # spaCy en_core_web_lg + Presidio engines need ~10–15s to load.
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false  # gunicorn writes /tmp; keep writable
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: presidio-pii
+  namespace: presidio
+  labels:
+    app: presidio-pii
+spec:
+  type: ClusterIP
+  selector:
+    app: presidio-pii
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+# Restrict /redact to in-cluster callers only — APIM reaches us via the
+# AKS-internal Service DNS, never from the public internet. The gateway
+# (and any future evals job) sit in the same VNet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: presidio-pii-allow-internal
+  namespace: presidio
+spec:
+  podSelector:
+    matchLabels:
+      app: presidio-pii
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        # APIM private endpoint pods land in the apim-system namespace
+        # when APIM is wired to the workshop VNet.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: apim-system
+        # Attendee namespaces also call /redact directly during M2 hands-on.
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: ["default"]
+        # Allow same-namespace traffic for diagnostics (kubectl exec curl).
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: presidio
+      ports:
+        - port: 8080
+          protocol: TCP
