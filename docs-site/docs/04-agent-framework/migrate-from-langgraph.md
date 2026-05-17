@@ -157,9 +157,12 @@ The pip resolver also prints `opentelemetry-sdk 1.40.0 vs otlp-proto-grpc
 ## Step 4 — Same end result with MAF
 
 If you decide to rewrite the chain in MAF, you get the agent-specific
-features (typed Workflows, checkpointing, the `OpenAIChatClient` that
-works against four backends). Same instrumentation pattern — different
-extension:
+features (typed Workflows, checkpointing, the `OpenAIChatCompletionClient`
+that works against AOAI / APIM / LiteLLM / the self-hosted SLM with a
+single client class, plus `FoundryLocalClient` for the laptop path —
+see [M4 Step 1](./intro.md#step-1--smoke-test-the-python-stack) for
+why this client and not `OpenAIChatClient`). Same instrumentation
+pattern — different extension:
 
 ```python
 from microsoft_agents_a365.observability.core import configure
@@ -184,7 +187,7 @@ MAF agent appear as siblings — you can A/B them on the same dashboard.
 | Existing investment | ✅ — keep using | n/a |
 | Typed Workflows + checkpoint | LangGraph (Python only) | ✅ .NET CosmosCheckpointStore today; Python file-on-PVC |
 | .NET parity | weak | ✅ first-class |
-| One client class for AOAI / SLM / LiteLLM / Foundry Local | ❌ (different adapters per backend) | ✅ `OpenAIChatClient` everywhere |
+| One client class for AOAI / SLM / LiteLLM / Foundry Local | ❌ (different adapters per backend) | ✅ `OpenAIChatCompletionClient` everywhere (`/v1/chat/completions` family) — `FoundryLocalClient` is the one exception |
 | Native Entra / Azure auth | community packages | ✅ first-class |
 | Foundry-Hosted managed runtime | n/a | ✅ one-config switch |
 | Time-travel debugging | ✅ (LangGraph) | ❌ |

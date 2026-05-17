@@ -153,7 +153,7 @@ curl -sG https://prices.azure.com/api/retail/prices \
 | Container Registry | indonesiacentral | Basic | $0.007 | $0.17 | ~$5 |
 | Storage / Key Vault / LAW / App Insights | indonesiacentral | Std_LRS + pay-per-GB ingest | — | ~$0.30 | ~$10 |
 | Content Safety (text & image) | southeastasia | **F0 (free)** | $0 | $0 | $0 |
-| AOAI `gpt-5-mini` Global PAYG | southeastasia | $0.45 in / $3.60 out per 1M tok | pay-per-use | ~$2-5 | varies |
+| AOAI `gpt-5-mini` Global PAYG | southeastasia | $0.25 in / $2.00 out per 1M tok (+$0.025/1M cached input) | pay-per-use | ~$1-3 | varies |
 | AOAI `text-embedding-3-large` Global | southeastasia | $0.13 per 1M tok | pay-per-use | <$0.10 | varies |
 | **Baseline total (always-on infra + typical tokens)** | — | — | — | **~$17-20/day** | **~$469/mo + tokens** |
 

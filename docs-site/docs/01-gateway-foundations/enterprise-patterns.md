@@ -209,16 +209,42 @@ boundary. See
 
 **Pair with chargeback dashboard.** The existing
 `<llm-emit-token-metric>` (M2.1) already tags every metric with
-`Subscription ID`. To compute per-tenant monthly burn:
+`Subscription ID` **and splits prompt vs completion tokens into two
+separate metric names** (`Prompt Tokens` and `Completion Tokens`,
+plus the convenience aggregate `Total Tokens`). Compute per-tenant
+monthly burn with the correct per-direction unit cost:
 
 ```kusto
+// gpt-5-mini Global Standard PAYG, verified 2026-05-28 via Azure Retail
+// Prices API: input USD 0.25 / 1M tok, output USD 2.00 / 1M tok.
+// Re-pull before quoting; prices move. See README §Cost ceiling.
+let price_in_per_token  = 0.25 / 1e6;
+let price_out_per_token = 2.00 / 1e6;
 customMetrics
-| where name == "Total Tokens"
 | where timestamp > startofmonth(now())
+| where name in ("Prompt Tokens", "Completion Tokens")
 | extend sub = tostring(customDimensions["Subscription ID"])
-| summarize tokens = sum(value) by sub
-| extend cost_usd_estimate = tokens * 0.00015 / 1000   // gpt-5-mini list price
-| order by cost_usd_estimate desc
+| summarize tokens = sum(value) by sub, name
+| extend cost_usd_estimate = case(
+    name == "Prompt Tokens",     tokens * price_in_per_token,
+    name == "Completion Tokens", tokens * price_out_per_token,
+    real(null))
+| summarize cost_usd = sum(cost_usd_estimate),
+            prompt_tokens     = sumif(tokens, name == "Prompt Tokens"),
+            completion_tokens = sumif(tokens, name == "Completion Tokens")
+  by sub
+| order by cost_usd desc
+```
+
+If your dashboard only joined `Total Tokens` (the aggregate metric),
+swap in this blended approximation while you migrate to the
+two-metric split — it assumes the workshop's typical 2:1 input:output
+mix (1K in + 0.5K out per request) so it under-counts heavy-output
+workloads:
+
+```kusto
+// Blended: $(1K * 0.25 + 0.5K * 2.0) / 1.5K tok = $0.000833 / 1K tok.
+| extend cost_usd_estimate = tokens * 0.000833 / 1000
 ```
 
 **Per-tenant variable ceilings.** A real chargeback system gives

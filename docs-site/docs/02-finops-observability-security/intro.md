@@ -344,17 +344,43 @@ the portal to more teams."*
 
 ### The math, with real numbers
 
-Assume one consumer team uses Azure OpenAI `gpt-5-mini` via APIM. Pay-as-you-go
-pricing is roughly USD 0.00015 per 1K input tokens and USD 0.00060 per
-1K output tokens (check the
-[current price list](https://azure.microsoft.com/pricing/details/cognitive-services/openai-service/)
-for your region). With a typical chatbot session of 1K input + 0.5K
-output tokens:
+Assume one consumer team uses Azure OpenAI `gpt-5-mini` via APIM
+(**Global Standard** pay-as-you-go — the SKU this workshop deploys).
+The Azure Retail Pricing API on **May 28, 2026** reports
+**USD 0.25 per 1M input tokens** and **USD 2.00 per 1M output tokens**
+(cached input is even cheaper at USD 0.025/1M — see the
+[verified cost ceiling](https://github.com/adindabudi/azure-hybrid-ai-platform-workshop#cost-ceiling-10-attendee-1-day-workshop)
+in the repo README and re-check before any production sizing).
+Converting to the per-1K-tokens unit most teams reason in:
 
-- Cost per request: `(1 * 0.00015) + (0.5 * 0.00060)` ≈ **USD 0.00045**
-- 50K requests/day: **USD 22.50/day** ≈ **USD 675/month** for one team
-- 10 consumer teams unconstrained: **USD 6,750/month** — and that's
+- Input: **USD 0.00025 / 1K tokens**
+- Output: **USD 0.0020 / 1K tokens**
+
+With a typical chatbot session of 1K input + 0.5K output tokens:
+
+- Cost per request: `(1 * 0.00025) + (0.5 * 0.0020)` ≈ **USD 0.00125**
+- 50K requests/day: **USD 62.50/day** ≈ **USD 1,875/month** for one team
+- 10 consumer teams unconstrained: **USD 18,750/month** — and that's
   the *good* case where every request is well-sized.
+
+:::tip Re-verify before quoting in a customer deck
+Azure prices move; treat the number above as a snapshot, not a
+constant. Re-pull with:
+
+```bash
+curl -sG https://prices.azure.com/api/retail/prices \
+  --data-urlencode "api-version=2023-01-01-preview" \
+  --data-urlencode "\$filter=serviceName eq 'Foundry Models' and productName eq 'Azure OpenAI GPT5'" \
+  | jq '.Items[] | select(.skuName | test("Mini.*Glbl"; "i")) | {sku:.skuName, meter:.meterName, price:.retailPrice, uom:.unitOfMeasure}'
+```
+
+The four SKUs you should see for our deploy: `GPT 5 Mini Inpt Glbl`
+(input), `GPT 5 Mini outpt Glbl` (output), `GPT 5 Mini cchd Inpt Glbl`
+(cached input), and the matching `Batch …` rows (~50% off for
+non-interactive batch jobs). Don't confuse the `5 mini pp …` SKUs
+(those are Provisioned-Throughput rates, ~1.8× the Global Standard
+PAYG price per token — see *When to move from PAYG to PTU* below).
+:::
 
 The gateway lets you bound that bill in three places at once:
 

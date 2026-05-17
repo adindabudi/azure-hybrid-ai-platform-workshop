@@ -409,31 +409,61 @@ sandboxed compute. Hosted Agents are in Public Preview and available in
 Southeast Asia, East US 2, Sweden Central, and a few other regions
 ([region list](https://learn.microsoft.com/azure/foundry/agents/concepts/hosted-agents#platform-details)).
 
-```python
-from agent_framework import Agent
-from agent_framework.foundry import FoundryAgent, FoundryChatClient
-from azure.identity import DefaultAzureCredential
+There are two integration shapes, both grounded in the official
+[Agent Framework Foundry sample](https://github.com/microsoft/agent-framework/blob/main/python/samples/AGENTS.md):
 
-# Direct inference path — your code owns instructions + tools.
+```python
+import os
+from agent_framework import Agent
+from agent_framework.foundry import FoundryChatClient
+from azure.identity import AzureCliCredential
+
+# Path A — direct inference. Your code owns the instructions + tools;
+# Foundry only provides the model endpoint + observability surface.
+client = FoundryChatClient(
+    project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
+    model=os.environ.get("FOUNDRY_MODEL", "gpt-5-mini"),
+    credential=AzureCliCredential(),
+)
 direct_agent = Agent(
-    client=FoundryChatClient(
-        project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-        model="gpt-5-mini",
-        credential=DefaultAzureCredential(),
-    ),
+    client=client,
     name="ComplaintTriage",
     instructions="You triage customer support requests.",
     tools=[classify_complaint],
 )
+```
 
-# Service-managed path — agent definition lives in Foundry portal.
-hosted_agent = FoundryAgent(
-    project_endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-    agent_name="complaint-triage",
-    agent_version="1.0",
+```python
+# Path B — service-managed: the agent's name, instructions, and tool
+# bindings live in the Foundry portal. The Python SDK retrieves the
+# pre-registered agent record via the Foundry project client and wraps
+# it as a local ChatAgent. See
+# https://github.com/microsoft/agent-framework/blob/main/docs/decisions/0011-create-get-agent-api.md
+import os
+from agent_framework.azure import get_agent
+from azure.ai.projects import AIProjectClient
+from azure.identity import DefaultAzureCredential
+
+project = AIProjectClient(
+    endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
     credential=DefaultAzureCredential(),
 )
+hosted_agent = await get_agent(
+    project,
+    agent_id=os.environ["FOUNDRY_HOSTED_AGENT_ID"],   # e.g. asst_…
+)
 ```
+
+:::caution `FoundryAgent(agent_name=…, agent_version=…)` is not a Python class
+Older drafts of this workshop and a couple of .NET-only blog posts
+show a constructor like `FoundryAgent(project_endpoint=…,
+agent_name=…, agent_version=…)`. That shape exists in the **.NET**
+package (`Microsoft.Agents.AI.Foundry`), **not** the Python package.
+In Python use `get_agent(project_client, agent_id=…)` per the
+[`agent-framework` decision record 0011](https://github.com/microsoft/agent-framework/blob/main/docs/decisions/0011-create-get-agent-api.md);
+the agent ID (`asst_…`) is shown next to the agent in the Foundry
+portal.
+:::
 
 **Hosted Agent Tracing** is also Public Preview (April 2026) — traces
 from Foundry-hosted runtime show up in your Application Insights with
