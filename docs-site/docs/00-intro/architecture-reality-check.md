@@ -63,14 +63,15 @@ the workshop architecture are bolded.
 Because Azure OpenAI is not in Indonesia Central today, the workshop fans
 out to Singapore for LLM and embedding calls. Traffic flows:
 
-```
-laptop → APIM (Indonesia Central)
-              ↓
-        AOAI (Southeast Asia, ~30–40 ms RTT)
-              ↑
-         response
-              ↑
-laptop ← APIM (Indonesia Central)
+```mermaid
+sequenceDiagram
+    participant L as Laptop<br/>(Indonesia)
+    participant G as APIM<br/>(Indonesia Central)
+    participant A as AOAI<br/>(Southeast Asia)
+    L->>G: 1. POST /chat/completions
+    G->>A: 2. forward (cross-region, ~30–40 ms RTT)
+    A-->>G: 3. response
+    G-->>L: 4. response
 ```
 
 This is acceptable for dev. For production, the same APIM stays in IDC

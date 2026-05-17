@@ -453,16 +453,24 @@ The four routing patterns ([Backend pools](https://learn.microsoft.com/azure/api
 
 The recommended BFSI stack sits in this order in `<inbound>`:
 
-```
-1. ip-filter-allowlist                ← at the door
-2. validate-jwt                       ← authn
-3. llm-content-safety / shield-prompt ← prompt scrub
-4. quota-by-key-monthly               ← chargeback ceiling (HARD)
-5. llm-token-limit                    ← per-minute throttle (BURST)
-6. llm-emit-token-metric              ← chargeback telemetry
-7. llm-semantic-cache-lookup          ← serve from cache if possible
-8. log-to-eventhub                    ← audit before forwarding
-9. set-backend-service / route        ← pick the model
+```mermaid
+flowchart TB
+    Req([Incoming request]) --> P1
+    P1["1. ip-filter-allowlist"]:::gate --> P2
+    P2["2. validate-jwt"]:::gate --> P3
+    P3["3. llm-content-safety / shield-prompt"]:::gate --> P4
+    P4["4. quota-by-key-monthly<br/><i>chargeback ceiling (HARD)</i>"]:::limit --> P5
+    P5["5. llm-token-limit<br/><i>per-minute throttle (BURST)</i>"]:::limit --> P6
+    P6["6. llm-emit-token-metric"]:::obs --> P7
+    P7["7. llm-semantic-cache-lookup"]:::cache --> P8
+    P8["8. log-to-eventhub"]:::obs --> P9
+    P9["9. set-backend-service / route"]:::route --> Out([Backend])
+
+    classDef gate fill:#fde7e9,stroke:#c5221f,stroke-width:1px
+    classDef limit fill:#fef7e0,stroke:#f9ab00,stroke-width:1px
+    classDef obs fill:#e8f0fe,stroke:#4285f4,stroke-width:1px
+    classDef cache fill:#e6f4ea,stroke:#34a853,stroke-width:1px
+    classDef route fill:#f3e8fd,stroke:#9334e6,stroke-width:1px
 ```
 
 In `<backend>`:
