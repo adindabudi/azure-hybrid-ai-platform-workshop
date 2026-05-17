@@ -18,6 +18,9 @@ locals {
     cosmos     = "cosmos-${var.prefix}-${local.suffix}"
     aoai       = "aoai-${var.prefix}-sea-${local.suffix}"
     cog_safety = "cs-${var.prefix}-sea-${local.suffix}"
+    foundry    = "aif${var.prefix}${local.suffix}"     # AIServices account; alphanumeric, 2-64
+    foundry_pr = "prj-${var.prefix}-${local.suffix}"   # Foundry project under the account
+    redis      = "redis-${var.prefix}-${local.suffix}" # Managed Redis cluster (3-63 chars, lowercase + dashes)
   }
 
   tags = merge(var.common_tags, {

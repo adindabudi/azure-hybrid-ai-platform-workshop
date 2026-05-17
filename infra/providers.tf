@@ -53,4 +53,23 @@ provider "azurerm" {
   }
 }
 
+# Provider alias for the Microsoft Foundry resource.
+#
+# Foundry projects can technically be created in many regions, but the
+# `azure.ai.evaluation.red_team.RedTeam` cloud service is only available in:
+# East US 2, France Central, Sweden Central, Switzerland West, US North Central.
+# We keep this as a separate alias so the operator can pin a region distinct
+# from `azurerm` (primary) and `azurerm.sea` (AOAI gateway) without juggling
+# `provider =` overrides at every resource.
+provider "azurerm" {
+  alias               = "foundry"
+  storage_use_azuread = true
+
+  features {
+    cognitive_account {
+      purge_soft_delete_on_destroy = true
+    }
+  }
+}
+
 provider "azapi" {}

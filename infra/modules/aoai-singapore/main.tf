@@ -13,8 +13,18 @@ variable "location" { type = string }
 variable "aoai_name" { type = string }
 variable "content_safety_name" {
   type        = string
-  description = "Content Safety account name. The account is intentionally not created in the default workshop deploy because many test subscriptions lack the required entitlement; kept for API compatibility so the variable can be set by forks that have the entitlement."
+  description = "Content Safety account name. Created with the F0 (free) SKU by default — F0 is available on most subscriptions including Internal/MCAP/trial. Set `deploy_content_safety = false` to skip (e.g. on the rare subscription where even F0 is blocked)."
   default     = ""
+}
+variable "deploy_content_safety" {
+  type        = bool
+  default     = true
+  description = "If true (default), create an Azure AI Content Safety account with the F0 free SKU and wire it into the APIM `llm-content-safety` policy. Set false to skip on subscriptions that block ContentSafety entirely."
+}
+variable "content_safety_sku" {
+  type        = string
+  default     = "F0"
+  description = "Content Safety SKU. `F0` (free) works on most subscriptions; `S0` requires a quota/feature entitlement that Internal/MCAP subscriptions typically lack."
 }
 variable "gpt_4o_mini_capacity" { type = number }
 variable "embedding_capacity" { type = number }
@@ -47,9 +57,9 @@ resource "azurerm_cognitive_account" "aoai" {
 # The workshop defaults to `gpt-5-mini` (GlobalStandard) because many test
 # subscriptions have zero free quota for `gpt-4o-mini` / `gpt-4.1-mini` in
 # the SEA region, while `gpt-5-mini` reliably has free quota across all the
-# Internal subscriptions we tested in May 2026. In a customer's paid
-# production subscription, change the deployment name + model + version
-# below to whichever model your contract entitles you to.
+# subscriptions we tested in May 2026. In a paid production subscription,
+# change the deployment name + model + version below to whichever model
+# your contract entitles you to.
 resource "azurerm_cognitive_deployment" "gpt_4o_mini" {
   name                 = "gpt-5-mini"
   cognitive_account_id = azurerm_cognitive_account.aoai.id
@@ -87,22 +97,33 @@ resource "azurerm_cognitive_deployment" "embedding" {
 }
 
 # ============================================================================
-# Content Safety — SKIPPED by default for this workshop
+# Content Safety — F0 (free) by default
 #
-# Microsoft Content Safety requires a SKU entitlement (QuotaId/Feature) that
-# Internal / MCAP / many trial subscriptions do not have. The default
-# behaviour is therefore to skip the CS account here, and demonstrate one of
-# the two production paths in the docs:
+# F0 is generally available on Internal / MCAP / trial subscriptions where S0
+# is blocked by quota entitlement. To upgrade in a production fork, set
+# `content_safety_sku = "S0"`. To skip entirely (subscription has no CS
+# entitlement at all), set `deploy_content_safety = false`.
 #
-#   1. Use AOAI's built-in content filters for the dev demo, OR
-#   2. Run the Content Safety **container** on AKS for in-region scanning
-#      (see `apps/content-safety-cpu/`)
-#
-# In a paid customer subscription with full entitlement, uncomment the
-# `azurerm_cognitive_account` block for content safety in your fork and
-# wire its endpoint into the `llm-content-safety` APIM policy via
-# managed identity.
+# When enabled, this account is wired into the APIM `llm-content-safety`
+# policy by `scripts/apply-apim-policies.sh --with-content-safety` (which
+# now also picks up the account name automatically from the
+# `content_safety_name` Terraform output).
 # ============================================================================
+resource "azurerm_cognitive_account" "content_safety" {
+  count = var.deploy_content_safety ? 1 : 0
+
+  name                  = var.content_safety_name
+  resource_group_name   = var.resource_group_name
+  location              = var.location
+  kind                  = "ContentSafety"
+  sku_name              = var.content_safety_sku
+  custom_subdomain_name = var.content_safety_name
+  tags                  = var.tags
+
+  identity {
+    type = "SystemAssigned"
+  }
+}
 
 output "endpoint" {
   value = azurerm_cognitive_account.aoai.endpoint
@@ -125,11 +146,16 @@ output "embedding_deployment_name" {
 }
 
 output "content_safety_endpoint" {
-  description = "Content Safety endpoint URL. Empty when CS account is skipped due to subscription entitlement."
-  value       = ""
+  description = "Content Safety endpoint URL. Empty when CS account is disabled via deploy_content_safety=false."
+  value       = try(azurerm_cognitive_account.content_safety[0].endpoint, "")
 }
 
 output "content_safety_id" {
-  description = "Content Safety resource ID. Empty when skipped."
-  value       = ""
+  description = "Content Safety resource ID. Empty when disabled."
+  value       = try(azurerm_cognitive_account.content_safety[0].id, "")
+}
+
+output "content_safety_name" {
+  description = "Content Safety account name (mirrors the variable). Empty when disabled."
+  value       = try(azurerm_cognitive_account.content_safety[0].name, "")
 }

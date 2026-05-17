@@ -73,6 +73,31 @@ module "aoai_singapore" {
   tags = local.tags
 }
 
+# ---------- Microsoft Foundry project (opt-in) ----------
+# Provides the project descriptor required by:
+#   - apps/eval-suite/redteam.py            (azure.ai.evaluation.red_team.RedTeam)
+#   - apps/eval-suite/run_foundry_evals.py  (cloud-side FoundryEvals view)
+# Region-locked to one of: eastus2, francecentral, swedencentral,
+# switzerlandwest, northcentralus (per RedTeam service availability).
+# Disabled by default (enable_foundry_project = false in workshop.tfvars).
+module "foundry_project" {
+  source = "./modules/foundry-project"
+  count  = var.enable_foundry_project ? 1 : 0
+
+  providers = {
+    azurerm = azurerm.foundry
+  }
+
+  resource_group_name  = data.azurerm_resource_group.workshop.name
+  location             = var.location_foundry
+  account_name         = local.name.foundry
+  project_name         = local.name.foundry_pr
+  deploy_gpt_for_evals = var.foundry_deploy_gpt_for_evals
+  evals_capacity       = var.foundry_evals_capacity
+
+  tags = local.tags
+}
+
 # ---------- APIM Developer (long pole — ~25 min provision) ----------
 
 module "apim" {
@@ -89,6 +114,29 @@ module "apim" {
   application_insights_instrumentation_key = module.observability.application_insights_instrumentation_key
 
   attendees = local.attendees
+
+  tags = local.tags
+}
+
+# ---------- Azure Managed Redis for APIM semantic cache (opt-in) ----------
+# Backs the `llm-semantic-cache-lookup` + `llm-semantic-cache-store` policies.
+# Without this module deployed, those policies silently no-op (the APIM
+# built-in cache only does key lookups, not vector similarity).
+# Disabled by default — see variables.tf for the cost / latency tradeoff.
+module "managed_redis" {
+  source = "./modules/managed-redis"
+  count  = var.enable_semantic_cache ? 1 : 0
+
+  providers = {
+    azurerm = azurerm.sea
+  }
+
+  resource_group_name = data.azurerm_resource_group.workshop.name
+  location            = var.location_redis
+  redis_name          = local.name.redis
+  sku_name            = var.redis_sku_name
+  api_management_id   = module.apim.apim_id
+  cache_location      = var.location # bind cache to the APIM region (indonesiacentral)
 
   tags = local.tags
 }
