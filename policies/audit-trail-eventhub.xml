@@ -1,0 +1,85 @@
+<!--
+  audit-trail-eventhub.xml
+  Immutable audit trail to Azure Event Hubs for BFSI compliance
+  (Bank Indonesia POJK 11/2022, OJK SEOJK 21/2017, Basel BCBS 239).
+
+  Why an Event Hub instead of just App Insights:
+    1. App Insights is sampled by default (≤ 100% configurable, but the
+       sampler decides per-request). Event Hubs is NOT affected by sampling
+       — every invocation of <log-to-eventhub> is recorded.
+    2. App Insights has a 90-day default retention; bank audit retention is
+       typically 5–10 years. Event Hub → Storage / ADX gives you that.
+    3. Event Hub captures the raw, immutable, append-only stream a regulator
+       can replay independently of the app team.
+
+  Limits to know (May 2026):
+    - Max 200 KB per log message; APIM truncates above that.
+    - This policy does NOT itself capture request/response bodies — that's
+      a separate decision (PII risk vs. compliance need). Add `context.Request.Body`
+      only if your retention zone is approved for PII.
+
+  Source:
+    https://learn.microsoft.com/azure/api-management/log-to-eventhub-policy
+    https://learn.microsoft.com/azure/api-management/api-management-howto-log-event-hubs
+
+  Required setup (facilitator runs scripts/apply-apim-policies.sh and passes
+  the audit flag; the script creates the logger named audit-eventhub-logger
+  via az rest, since az apim logger create syntax cannot be safely embedded
+  inside an XML comment).
+-->
+<inbound>
+    <log-to-eventhub logger-id="audit-eventhub-logger">
+        @{
+            return new JObject(
+                new JProperty("ts",          DateTime.UtcNow.ToString("o")),
+                new JProperty("requestId",   context.RequestId),
+                new JProperty("subscription", context.Subscription?.Id ?? "anon"),
+                new JProperty("api",         context.Api.Id),
+                new JProperty("operation",   context.Operation.Id),
+                new JProperty("method",      context.Request.Method),
+                new JProperty("url",         context.Request.Url.ToString()),
+                new JProperty("clientIp",    context.Request.IpAddress),
+                new JProperty("userAgent",   context.Request.Headers.GetValueOrDefault("User-Agent","")),
+                new JProperty("modelTier",   context.Request.Headers.GetValueOrDefault("x-model-tier","")),
+                new JProperty("authMode",    context.Request.Headers.GetValueOrDefault("x-auth-mode","entra"))
+            ).ToString(Newtonsoft.Json.Formatting.None);
+        }
+    </log-to-eventhub>
+</inbound>
+
+<outbound>
+    <log-to-eventhub logger-id="audit-eventhub-logger">
+        @{
+            return new JObject(
+                new JProperty("ts",            DateTime.UtcNow.ToString("o")),
+                new JProperty("requestId",     context.RequestId),
+                new JProperty("statusCode",    context.Response.StatusCode),
+                new JProperty("backend",       context.Variables.ContainsKey("targetBackend")
+                                                ? (string)context.Variables["targetBackend"] : ""),
+                new JProperty("tokensConsumed", context.Response.Headers.GetValueOrDefault("x-tokens-consumed","")),
+                new JProperty("tokensRemaining",context.Response.Headers.GetValueOrDefault("x-tokens-remaining","")),
+                new JProperty("cacheStatus",   context.Variables.ContainsKey("semantic-cache-result")
+                                                ? (string)context.Variables["semantic-cache-result"] : "Miss"),
+                new JProperty("durationMs",    context.Elapsed.TotalMilliseconds)
+            ).ToString(Newtonsoft.Json.Formatting.None);
+        }
+    </log-to-eventhub>
+</outbound>
+
+<on-error>
+    <log-to-eventhub logger-id="audit-eventhub-logger">
+        @{
+            var err = context.LastError;
+            return new JObject(
+                new JProperty("ts",        DateTime.UtcNow.ToString("o")),
+                new JProperty("requestId", context.RequestId),
+                new JProperty("level",     "ERROR"),
+                new JProperty("source",    err?.Source ?? ""),
+                new JProperty("reason",    err?.Reason ?? ""),
+                new JProperty("section",   err?.Section ?? ""),
+                new JProperty("message",   err?.Message ?? ""),
+                new JProperty("policyId",  err?.PolicyId ?? "")
+            ).ToString(Newtonsoft.Json.Formatting.None);
+        }
+    </log-to-eventhub>
+</on-error>

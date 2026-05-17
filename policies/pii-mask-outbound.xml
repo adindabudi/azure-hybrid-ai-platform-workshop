@@ -1,0 +1,159 @@
+<!--
+  pii-mask-outbound.xml
+  Outbound response scrub via the Presidio orchestrator running in-cluster
+  (apps/presidio-pii). One <send-request> per response, no regex inside
+  APIM. Indonesian PII (NIK, NPWP, ID phone, bank account) plus spaCy NER
+  (PERSON, LOCATION, ORG) plus optional Azure AI Language PII categories
+  are all consolidated into a single /redact response from Presidio.
+
+  Why this is NOT a chain of <find-and-replace> policies:
+    The APIM `find-and-replace` policy does SUBSTRING replacement, not
+    regex, per MS Learn:
+      https://learn.microsoft.com/azure/api-management/find-and-replace-policy
+    That means patterns like (?<![0-9])\d{16}(?![0-9]) would silently
+    match nothing, and the gateway would pass PII through while *looking*
+    safe. We avoid that whole category of bug by pushing detection to
+    Presidio (which does support regex + NER + remote recognizers).
+
+  Why outbound, not inbound:
+    Prompts are USER input — the bank already classifies them at ingest.
+    The risk we are mitigating here is the MODEL hallucinating or echoing
+    PII back into the response stream, where downstream loggers persist
+    it to disk. The mask sits AFTER the model and BEFORE the caller's
+    logger.
+
+  Behavioural posture:
+    `ignore-error="true"` — fail OPEN. If Presidio is unreachable the
+    original response goes through and a header (`x-pii-redactor:
+    unavailable`) marks it. Flip to `false` if you require fail-closed
+    (response is dropped with 502 when Presidio is down).
+
+  Required setup:
+    1. Deploy Presidio:    kubectl apply -f apps/presidio-pii/deployment.yaml
+    2. (Optional, Mode B)  kubectl apply -f apps/language-pii-cpu/language-pii-cpu.yaml
+                            then kubectl create secret language-pii (see README)
+    3. Apply this fragment via:
+         scripts/apply-apim-policies.sh  (with the pii-mask flag)
+       The script folds this outbound block into the bundle's existing
+       outbound section just before the closing tag.
+
+  Source:
+    https://learn.microsoft.com/azure/api-management/send-request-policy
+    https://learn.microsoft.com/azure/api-management/set-body-policy
+    https://microsoft.github.io/presidio/getting_started/getting_started_text
+-->
+<outbound>
+    <!-- Skip non-success responses, non-JSON responses, and streaming
+         responses. We only mask completed JSON chat completions. -->
+    <choose>
+        <when condition="@(context.Response.StatusCode == 200
+                            &amp;&amp; context.Response.Headers.GetValueOrDefault(&quot;Content-Type&quot;,&quot;&quot;).Contains(&quot;application/json&quot;)
+                            &amp;&amp; !context.Response.Headers.GetValueOrDefault(&quot;Content-Type&quot;,&quot;&quot;).Contains(&quot;text/event-stream&quot;))">
+
+            <!-- 1. Pull the assistant message text out of the AOAI response.
+                 We support both the Chat Completions schema (choices[].message.content)
+                 and the Responses API (choices[].text), and concatenate when
+                 there are multiple choices. preserveContent=true is critical:
+                 we still want the original body downstream if anything fails. -->
+            <set-variable name="assistantText" value="@{
+                try {
+                    var body = context.Response.Body.As&lt;JObject&gt;(preserveContent: true);
+                    var choices = body[&quot;choices&quot;] as JArray;
+                    if (choices == null || choices.Count == 0) return string.Empty;
+                    var sb = new System.Text.StringBuilder();
+                    foreach (var c in choices) {
+                        var msg = c[&quot;message&quot;];
+                        string txt = null;
+                        if (msg != null) txt = (string)msg[&quot;content&quot;];
+                        if (txt == null) txt = (string)c[&quot;text&quot;];
+                        if (!string.IsNullOrEmpty(txt)) {
+                            if (sb.Length &gt; 0) sb.Append(&quot;\n&quot;);
+                            sb.Append(txt);
+                        }
+                    }
+                    return sb.ToString();
+                } catch { return string.Empty; }
+            }" />
+
+            <choose>
+                <when condition="@(!string.IsNullOrEmpty((string)context.Variables[&quot;assistantText&quot;]))">
+
+                    <!-- 2. Send the assistant text to Presidio /redact. One round-trip,
+                         not two — the orchestrator runs analyze + anonymize internally. -->
+                    <send-request mode="new" response-variable-name="redactResponse" timeout="5" ignore-error="true">
+                        <set-url>http://presidio-pii.presidio.svc.cluster.local/redact</set-url>
+                        <set-method>POST</set-method>
+                        <set-header name="Content-Type" exists-action="override">
+                            <value>application/json</value>
+                        </set-header>
+                        <set-body>@{
+                            return new JObject(
+                                new JProperty(&quot;text&quot;, (string)context.Variables[&quot;assistantText&quot;]),
+                                new JProperty(&quot;language&quot;, &quot;en&quot;)
+                            ).ToString();
+                        }</set-body>
+                    </send-request>
+
+                    <!-- 3. If Presidio answered, swap the redacted text back into
+                         the assistant message(s) and rewrite the response body. If
+                         Presidio failed (timeout / 5xx / unreachable), short-circuit
+                         to the fail-open path and add an audit header. -->
+                    <choose>
+                        <when condition="@{
+                            var r = (IResponse)context.Variables[&quot;redactResponse&quot;];
+                            return r != null &amp;&amp; r.StatusCode == 200;
+                        }">
+                            <set-variable name="redactedText" value="@{
+                                try {
+                                    var r = (IResponse)context.Variables[&quot;redactResponse&quot;];
+                                    var rb = r.Body.As&lt;JObject&gt;(preserveContent: true);
+                                    return (string)rb[&quot;text&quot;] ?? string.Empty;
+                                } catch { return string.Empty; }
+                            }" />
+
+                            <set-body>@{
+                                try {
+                                    var body = context.Response.Body.As&lt;JObject&gt;(preserveContent: true);
+                                    var choices = body[&quot;choices&quot;] as JArray;
+                                    var redacted = (string)context.Variables[&quot;redactedText&quot;];
+                                    if (choices != null &amp;&amp; choices.Count &gt; 0 &amp;&amp; !string.IsNullOrEmpty(redacted)) {
+                                        // For multi-choice responses we put the
+                                        // full redacted blob into choice[0] and
+                                        // blank the rest, since we lost per-choice
+                                        // boundaries when we concatenated. The
+                                        // workshop policy uses n=1 so this is the
+                                        // common case anyway.
+                                        var first = choices[0];
+                                        var msg = first[&quot;message&quot;];
+                                        if (msg != null) msg[&quot;content&quot;] = redacted;
+                                        else first[&quot;text&quot;] = redacted;
+                                        for (int i = 1; i &lt; choices.Count; i++) {
+                                            var ci = choices[i];
+                                            var mi = ci[&quot;message&quot;];
+                                            if (mi != null) mi[&quot;content&quot;] = string.Empty;
+                                            else ci[&quot;text&quot;] = string.Empty;
+                                        }
+                                    }
+                                    return body.ToString();
+                                } catch {
+                                    // Re-emit the original body on any JSON edit failure.
+                                    return context.Response.Body.As&lt;string&gt;(preserveContent: true);
+                                }
+                            }</set-body>
+                            <set-header name="x-pii-redactor" exists-action="override">
+                                <value>presidio</value>
+                            </set-header>
+                        </when>
+                        <otherwise>
+                            <!-- Fail-open marker. Audit / SIEM should alert on
+                                 a sustained rate of these. -->
+                            <set-header name="x-pii-redactor" exists-action="override">
+                                <value>unavailable</value>
+                            </set-header>
+                        </otherwise>
+                    </choose>
+                </when>
+            </choose>
+        </when>
+    </choose>
+</outbound>

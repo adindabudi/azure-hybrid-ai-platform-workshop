@@ -1,0 +1,29 @@
+{
+  "properties": {
+    "description": "AOAI backend with circuit breaker. Trips on >=5 (429 or 5xx) in 1 min; opens for 5 min; honors Retry-After. See policies/circuit-breaker-aoai.README.md.",
+    "url": "https://REPLACE-AOAI-ENDPOINT.openai.azure.com/openai",
+    "protocol": "http",
+    "credentials": {
+      "managedIdentity": {
+        "resource": "https://cognitiveservices.azure.com"
+      }
+    },
+    "circuitBreaker": {
+      "rules": [
+        {
+          "name": "aoai-trip-on-429-or-5xx",
+          "failureCondition": {
+            "count": 5,
+            "interval": "PT1M",
+            "statusCodeRanges": [
+              { "min": 429, "max": 429 },
+              { "min": 500, "max": 599 }
+            ]
+          },
+          "tripDuration": "PT5M",
+          "acceptRetryAfter": true
+        }
+      ]
+    }
+  }
+}

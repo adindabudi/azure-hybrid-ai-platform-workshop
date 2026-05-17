@@ -8,6 +8,6 @@
     <dimension name="Subscription ID" value="@(context.Subscription.Id)" />
     <dimension name="API ID"          value="@(context.Api.Id)" />
     <dimension name="Operation ID"    value="@(context.Operation.Id)" />
-    <dimension name="Model"           value="@(context.Request.Headers.GetValueOrDefault(" x-model-tier",string.Empty))" />
+    <dimension name="Model"           value="@(context.Request.Headers.GetValueOrDefault(&quot;x-model-tier&quot;,string.Empty))" />
     <dimension name="Client IP"       value="@(context.Request.IpAddress)" />
 </llm-emit-token-metric>

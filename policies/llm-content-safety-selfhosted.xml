@@ -28,19 +28,19 @@
     <when condition="@(context.Request.Body != null)">
         <!-- 1. Extract the user prompt from the OpenAI chat request body -->
         <set-variable name="userPrompt" value="@{
-            var body = context.Request.Body.As<JObject>(preserveContent: true);
-            var messages = (JArray)body["messages"];
+            var body = context.Request.Body.As&lt;JObject&gt;(preserveContent: true);
+            var messages = (JArray)body[&quot;messages&quot;];
             if (messages == null || messages.Count == 0) return string.Empty;
             // Concatenate all user messages (cap at 9_500 chars for the CS limit)
             var sb = new System.Text.StringBuilder();
             foreach (var m in messages) {
-                if ((string)m["role"] == "user") {
-                    if (sb.Length > 0) sb.Append('\n');
-                    sb.Append((string)m["content"]);
+                if ((string)m[&quot;role&quot;] == &quot;user&quot;) {
+                    if (sb.Length &gt; 0) sb.Append('\n');
+                    sb.Append((string)m[&quot;content&quot;]);
                 }
             }
             var s = sb.ToString();
-            return s.Length > 9500 ? s.Substring(0, 9500) : s;
+            return s.Length &gt; 9500 ? s.Substring(0, 9500) : s;
         }" />
 
         <!-- 2. Call the self-hosted Prompt Shields endpoint -->
@@ -54,19 +54,19 @@
                 <value>application/json</value>
             </set-header>
             <set-body>@{
-                var prompt = (string)context.Variables["userPrompt"];
-                return new JObject(new JProperty("userPrompt", prompt)).ToString();
+                var prompt = (string)context.Variables[&quot;userPrompt&quot;];
+                return new JObject(new JProperty(&quot;userPrompt&quot;, prompt)).ToString();
             }</set-body>
         </send-request>
 
         <!-- 3. If an attack is detected, short-circuit with 403 -->
         <choose>
             <when condition="@{
-                var resp = (IResponse)context.Variables["csResponse"];
+                var resp = (IResponse)context.Variables[&quot;csResponse&quot;];
                 if (resp.StatusCode != 200) return false;
-                var body = resp.Body.As<JObject>(preserveContent: true);
-                var det = body.SelectToken("userPromptAnalysis.attackDetected");
-                return det != null && (bool)det;
+                var body = resp.Body.As&lt;JObject&gt;(preserveContent: true);
+                var det = body.SelectToken(&quot;userPromptAnalysis.attackDetected&quot;);
+                return det != null &amp;&amp; (bool)det;
             }">
                 <return-response>
                     <set-status code="403" reason="ContentBlocked" />
@@ -89,24 +89,24 @@
                 <value>application/json</value>
             </set-header>
             <set-body>@{
-                var prompt = (string)context.Variables["userPrompt"];
+                var prompt = (string)context.Variables[&quot;userPrompt&quot;];
                 return new JObject(
-                    new JProperty("text", prompt),
-                    new JProperty("categories", new JArray("Hate", "Violence", "Sexual", "SelfHarm")),
-                    new JProperty("outputType", "EightSeverityLevels")
+                    new JProperty(&quot;text&quot;, prompt),
+                    new JProperty(&quot;categories&quot;, new JArray(&quot;Hate&quot;, &quot;Violence&quot;, &quot;Sexual&quot;, &quot;SelfHarm&quot;)),
+                    new JProperty(&quot;outputType&quot;, &quot;EightSeverityLevels&quot;)
                 ).ToString();
             }</set-body>
         </send-request>
 
         <choose>
             <when condition="@{
-                var r = (IResponse)context.Variables["csAnalyze"];
+                var r = (IResponse)context.Variables[&quot;csAnalyze&quot;];
                 if (r == null || r.StatusCode != 200) return false;
-                var b = r.Body.As<JObject>(preserveContent: true);
-                var cats = b["categoriesAnalysis"] as JArray;
+                var b = r.Body.As&lt;JObject&gt;(preserveContent: true);
+                var cats = b[&quot;categoriesAnalysis&quot;] as JArray;
                 if (cats == null) return false;
                 foreach (var c in cats) {
-                    if ((int)c["severity"] >= 4) return true;
+                    if ((int)c[&quot;severity&quot;] &gt;= 4) return true;
                 }
                 return false;
             }">

@@ -2,6 +2,10 @@
   mcp-oauth-pkce.xml
   Workshop M3.4. OAuth 2.0 / PKCE policy fragment for MCP endpoints.
   Adapted from Azure-Samples/remote-mcp-apim-functions-python.
+
+  Rate limit: 10 calls / 60s per subscription key. Low on purpose so the
+  M3.5 burst loop trips the limit in seconds. Raise this in production
+  after sizing the MCP server.
 -->
 <policies>
     <inbound>
@@ -14,7 +18,7 @@
                 </claim>
             </required-claims>
         </validate-jwt>
-        <rate-limit-by-key calls="120" renewal-period="60" counter-key="@(context.Subscription.Id)" />
+        <rate-limit-by-key calls="10" renewal-period="60" counter-key="@(context.Subscription.Id)" />
     </inbound>
     <backend><base /></backend>
     <outbound><base /></outbound>

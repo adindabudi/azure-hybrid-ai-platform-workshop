@@ -1,0 +1,39 @@
+<!--
+  retry-with-exponential-backoff.xml
+  Wraps the backend call in an exponential-backoff retry. Designed for the
+  Azure OpenAI 429 (Too Many Requests) case which is by far the most common
+  transient failure on AOAI Standard SKU.
+
+  How the wait math works (from MS Learn — retry-policy):
+    interval + 2^(count-1) * random(delta * 0.8, delta * 1.2), capped by max-interval
+
+    With interval=2, delta=2, max-interval=30:
+      attempt 1: ~2s
+      attempt 2: ~4s
+      attempt 3: ~8s
+      attempt 4: ~16s
+      attempt 5: 30s (capped)
+
+  Why first-fast-retry="false":
+    AOAI 429 means "wait Retry-After seconds" — never retry immediately.
+    Always honour the back-off.
+
+  Pair with the BACKEND-resource circuit breaker (see policies/circuit-breaker-aoai.json
+  and scripts/apply-apim-policies.sh, circuit-breaker flag). The retry handles the BURST;
+  the circuit breaker handles SUSTAINED failures. They are NOT alternatives.
+
+  Source:
+    https://learn.microsoft.com/azure/api-management/retry-policy
+    https://learn.microsoft.com/azure/api-management/backends#circuit-breaker
+-->
+<backend>
+    <retry
+        condition="@(context.Response.StatusCode == 429 || (context.Response.StatusCode &gt;= 500 &amp;&amp; context.Response.StatusCode &lt; 600))"
+        count="5"
+        interval="2"
+        max-interval="30"
+        delta="2"
+        first-fast-retry="false">
+        <forward-request buffer-request-body="true" />
+    </retry>
+</backend>

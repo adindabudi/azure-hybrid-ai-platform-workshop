@@ -1,0 +1,34 @@
+<!--
+  ip-filter-allowlist.xml
+  Source-IP allow-list. Workshop-relevant for BFSI scenarios where the AI
+  gateway must only accept calls from:
+    - Branch network egress NATs
+    - Express Route / VPN tunnel egress
+    - Application VNet egress (Azure NAT Gateway)
+
+  Behaviour:
+    `action="allow"` + IPs listed = whitelist (default-deny everything else)
+    `action="forbid"` + IPs listed = blacklist (default-allow everything else)
+    Forbidden caller gets HTTP 403 IPNotAllowed.
+
+  Public IPs only — APIM evaluates the X-Forwarded-For chain when the call
+  arrives via Application Gateway / Front Door. If an attacker spoofs the
+  XFF header on a direct hit, APIM IGNORES the spoofed values and uses the
+  TCP source IP. Source:
+    https://learn.microsoft.com/azure/api-management/ip-filter-policy
+
+  Apply at: API or operation scope. NOT global — global blocks the
+  developer portal and dev console too.
+
+  Operational tip: Combine with the bank's "external pen-tester" allowance
+  by using a <choose> wrapper that turns the filter OFF for an APIM named
+  value `pentest-window-active="true"`. Audit reviewers love that pattern.
+-->
+<ip-filter action="allow">
+    <!-- Branch egress NAT range — replace with your real CIDRs -->
+    <address-range from="10.20.0.0" to="10.20.255.255" />
+    <!-- Express Route circuit egress -->
+    <address-range from="172.16.10.0" to="172.16.10.255" />
+    <!-- Production app VNet NAT Gateway public IP -->
+    <address>20.205.122.18</address>
+</ip-filter>

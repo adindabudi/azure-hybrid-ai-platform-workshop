@@ -1,0 +1,36 @@
+<!--
+  load-balancer-weighted.xml
+  Alternative load-balancer config — WEIGHTED round-robin instead of
+  priority/failover. Use for cost-blended routing across PTU + Standard.
+
+  Workshop currently ships load-balancer-priority.xml (priority groups —
+  AOAI as P1, SLM as P2 fallback). Real BFSI deployments often need a
+  THIRD pattern beyond "primary/secondary":
+
+    Pattern A — Priority groups (load-balancer-priority.xml)
+       ▶ "Always use AOAI; fall back to SLM only if AOAI is dead."
+       ▶ Right for: production with one strict primary.
+
+    Pattern B — Weighted round-robin (THIS file)
+       ▶ "Send 70% to PTU (cheap-per-token), 30% to Standard (burst capacity)."
+       ▶ Right for: blended-cost serving where both backends are healthy.
+
+    Pattern C — Session-aware (sticky)
+       ▶ "Pin a single conversation to the same backend for the whole
+          chat session (so streamed deltas don't get re-routed mid-flight)."
+       ▶ Configured on the BACKEND POOL via `sessionAware` attribute, not
+          via inline policy. See scripts/apply-apim-policies.sh and the lb-session flag.
+
+  This file shows pattern B. The pool itself is created out-of-band
+  (the script does it); this XML simply points the API at the pool.
+
+  Pool composition (created by the script):
+    aoai-blended-pool (type=Pool):
+      - aoai-ptu-sea     weight=70   (PTU instance, predictable cost)
+      - aoai-standard-sea weight=30  (Standard SKU, burst capacity)
+
+  Source:
+    https://learn.microsoft.com/azure/api-management/backends#load-balanced-pool
+    https://learn.microsoft.com/azure/api-management/genai-gateway-capabilities#load-balancer
+-->
+<set-backend-service backend-id="aoai-blended-pool" />

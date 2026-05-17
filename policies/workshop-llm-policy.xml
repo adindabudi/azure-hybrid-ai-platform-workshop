@@ -45,10 +45,15 @@
         <!-- M2.5 — Per-attendee rate limiting (additional to llm-token-limit) -->
         <rate-limit-by-key calls="60" renewal-period="60" counter-key="@(context.Subscription.Id)" />
 
-        <!-- M1.4 — Token limit per subscription -->
+        <!-- M1.4 — Token limit per subscription.
+             Workshop default is 5000 TPM so a single attendee can run a
+             multi-evaluator pass (IntentResolution + ToolCallAccuracy +
+             TaskAdherence + Relevance + Groundedness) over 5-10 rows
+             without 429-throttling itself. Production should sit closer
+             to 500-1000 TPM with quota-by-key-monthly on top. -->
         <llm-token-limit
             counter-key="@(context.Subscription.Id)"
-            tokens-per-minute="500"
+            tokens-per-minute="5000"
             estimate-prompt-tokens="false"
             tokens-consumed-header-name="x-tokens-consumed"
             remaining-tokens-header-name="x-tokens-remaining" />
