@@ -36,4 +36,23 @@ ls -lh .checkpoints/                       # one JSON per executor hop
 | APIM → AOAI Singapore | `MODEL_TIER=premium MODEL_NAME=gpt-5-mini` |
 | APIM → self-hosted Phi-4-mini | `MODEL_TIER=cheap MODEL_NAME=phi-4-mini-instruct` |
 | LiteLLM standalone | `APIM_URL=http://<litellm-svc>:4000 MODEL_NAME=gpt-5-mini-via-litellm` |
-| Foundry Local | swap `OpenAIChatClient` for `FoundryLocalClient` — see M4 Step 4(d) |
+| Foundry Local | swap `OpenAIChatCompletionClient` for `FoundryLocalClient` — see M4 Step 4(d) |
+
+## Why `OpenAIChatCompletionClient` (and not `OpenAIChatClient`)?
+
+`agent-framework` 1.4.0 split the OpenAI client surface in two:
+
+- **`OpenAIChatClient`** → calls the **OpenAI Responses API**
+  (`/v1/responses`). Azure OpenAI exposes it, but the APIM Developer
+  SKU in this workshop imports the `inference.json` spec from
+  `Azure/azure-rest-api-specs`, which only includes
+  `/openai/deployments/{name}/chat/completions`. Requests to
+  `/responses` 404 at the gateway.
+- **`OpenAIChatCompletionClient`** → calls the **chat completions API**,
+  which is what APIM exposes today. Use this whenever APIM sits in
+  front of AOAI (which is always in this workshop).
+
+If you're pointing the agent directly at Azure OpenAI without APIM in
+front, either client works — Responses API gives you slightly better
+streaming. The workshop sticks with `OpenAIChatCompletionClient` for
+consistency.
