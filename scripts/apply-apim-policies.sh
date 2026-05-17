@@ -23,13 +23,22 @@
 #   --with-audit            also create Event Hub logger + apply
 #                           audit-trail-eventhub.xml (requires EH_NAMESPACE,
 #                           EH_HUB_NAME env vars)
-#   --with-pii-mask         also wrap the bundle outbound section with the
-#                           PII-mask <find-and-replace> chain
+#   --with-pii-mask         also fold the outbound PII-mask block (one
+#                           <send-request> per response to the in-cluster
+#                           Presidio orchestrator at apps/presidio-pii)
+#                           into the bundle. Requires apps/presidio-pii
+#                           to be deployed first; see its README for the
+#                           optional Mode B (Presidio + Azure AI Language).
 #   --with-quota            also append quota-by-key-monthly.xml inbound
 #   --dry-run               print every command, execute none
 #
 # Required env vars (auto-read from terraform if blank):
 #   RG, APIM, AOAI_ENDPOINT, AOAI_NAME
+#
+# Optional env vars:
+#   ATTENDEE_COUNT          number of attendee-NN products to link openai API to.
+#                           Falls back to discovering every `attendee-*` product
+#                           on the APIM service.
 #
 # Usage:
 #   ./scripts/apply-apim-policies.sh
@@ -77,7 +86,7 @@ run() {
   if (( DRY == 1 )); then
     printf '  [dry-run] %s\n' "$*"
   else
-    eval "$@"
+    "$@"
   fi
 }
 
@@ -114,6 +123,66 @@ run az apim api import -g "$RG" --service-name "$APIM" \
   --specification-format OpenApiJson --specification-path "$SPEC" \
   --protocols https
 green "API 'openai' imported"
+
+# ------------------------------------------------------------
+# Step 1.4 — PATCH subscriptionKeyParameterNames so the header
+# the Azure OpenAI / azure-ai-evaluation SDKs send by default
+# (`api-key`) is the one APIM actually checks. Out-of-the-box
+# `az apim api import` sets this to `Ocp-Apim-Subscription-Key`,
+# which is APIM's classic default but does NOT match what the
+# OpenAI Python SDK / azure-ai-evaluation send. Result:
+# every SDK call returns 401 "Access denied due to invalid
+# subscription key" until this is patched.
+#
+# Idempotent: the previous `az apim api import` preserves the
+# existing value when the spec doesn't override it, so we read
+# first and only PATCH if it's not already `api-key`.
+# ------------------------------------------------------------
+CURRENT_HEADER=$(az rest --method get \
+  --url "${MGMT}/apis/openai?api-version=${API_VER}" \
+  --query 'properties.subscriptionKeyParameterNames.header' -o tsv 2>/dev/null || echo "")
+if [[ "$CURRENT_HEADER" == "api-key" ]]; then
+  green "API 'openai' subscription-key header already set to 'api-key' (skip)"
+else
+  run az rest --method patch \
+    --url "${MGMT}/apis/openai?api-version=${API_VER}" \
+    --headers Content-Type=application/json "If-Match=*" \
+    --body '{"properties":{"subscriptionKeyParameterNames":{"header":"api-key","query":"subscription-key"}}}' >/dev/null
+  green "API 'openai' subscription-key header set to 'api-key' (was '${CURRENT_HEADER}')"
+fi
+
+# ------------------------------------------------------------
+# Step 1.5 — Link the openai API to every attendee product so
+# subscription keys actually authorise it. `az apim api import`
+# only creates the API; the subscription key on each attendee
+# product is scoped to the product's API list, so without this
+# linkage every attendee request returns 401 “invalid subscription
+# key”.
+# ------------------------------------------------------------
+link_api_to_attendee_products() {
+  local products attendee_count="${ATTENDEE_COUNT:-}"
+  if [[ -n "$attendee_count" ]]; then
+    products=$(seq -f 'attendee-%02g' 1 "$attendee_count")
+  else
+    # Discover every product whose id starts with `attendee-` (matches the
+    # naming convention in infra/modules/apim-developer/main.tf).
+    products=$(az apim product list -g "$RG" --service-name "$APIM" \
+      --query "[?starts_with(name, 'attendee-')].name" -o tsv 2>/dev/null || true)
+  fi
+  if [[ -z "$products" ]]; then
+    yellow "No attendee-* products found — skipping API→product linkage (M0 bootstrap not run yet?)"
+    return 0
+  fi
+  local linked=0
+  for product_id in $products; do
+    run az rest --method put \
+      --url "${MGMT}/products/${product_id}/apis/openai?api-version=${API_VER}" \
+      --body '{}' --headers Content-Type=application/json >/dev/null
+    linked=$((linked + 1))
+  done
+  green "openai API linked to ${linked} attendee product(s)"
+}
+link_api_to_attendee_products
 
 # ============================================================
 # Step 2 — RBAC: APIM MI → Cognitive Services User on AOAI
@@ -186,9 +255,12 @@ JSON
 put_backend embeddings-backend /tmp/be-emb.json
 green "Backend embeddings-backend"
 
-# slm-phi4 — internal LB IP (only if the service exists; soft-fail otherwise)
+# slm-phi4 — internal LB IP (only if the service exists; soft-fail otherwise).
+# SLM_PRESENT drives whether the priority pool below includes slm-phi4 — the
+# pool creation must not reference a backend that wasn't created.
 SLM_IP=$(kubectl get svc slm-phi4 -n slm \
   -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+SLM_PRESENT=0
 if [[ -n "$SLM_IP" ]]; then
   cat > /tmp/be-slm.json <<JSON
 {
@@ -200,45 +272,50 @@ if [[ -n "$SLM_IP" ]]; then
 JSON
   put_backend slm-phi4 /tmp/be-slm.json
   green "Backend slm-phi4 (http://${SLM_IP}:8000/v1)"
+  SLM_PRESENT=1
 else
   yellow "slm-phi4 service not deployed (skip — header routing will 502 until deployed)"
 fi
 
 # ============================================================
-# Step 4 — Backend Pool aoai-pool (P1=aoai-sea, P2=slm-phi4)
+# Step 4 — Backend Pool aoai-pool (P1=aoai-sea, P2=slm-phi4 when present)
 # ============================================================
 echo "[4/7] Create priority backend pool aoai-pool..."
+POOL_SERVICES="[{ \"id\": \"/subscriptions/${SUB_ID}/resourceGroups/${RG}/providers/Microsoft.ApiManagement/service/${APIM}/backends/aoai-sea\", \"priority\": 1, \"weight\": 100 }"
+if (( SLM_PRESENT == 1 )); then
+  POOL_SERVICES="${POOL_SERVICES}, { \"id\": \"/subscriptions/${SUB_ID}/resourceGroups/${RG}/providers/Microsoft.ApiManagement/service/${APIM}/backends/slm-phi4\", \"priority\": 2, \"weight\": 100 }"
+fi
+POOL_SERVICES="${POOL_SERVICES}]"
 cat > /tmp/be-pool.json <<JSON
 {
   "properties": {
     "type": "Pool",
-    "pool": {
-      "services": [
-        { "id": "/subscriptions/${SUB_ID}/resourceGroups/${RG}/providers/Microsoft.ApiManagement/service/${APIM}/backends/aoai-sea", "priority": 1, "weight": 100 },
-        { "id": "/subscriptions/${SUB_ID}/resourceGroups/${RG}/providers/Microsoft.ApiManagement/service/${APIM}/backends/slm-phi4",  "priority": 2, "weight": 100 }
-      ]
-    }
+    "pool": { "services": ${POOL_SERVICES} }
   }
 }
 JSON
 put_backend aoai-pool /tmp/be-pool.json
-green "Pool aoai-pool (P1=aoai-sea, P2=slm-phi4)"
+if (( SLM_PRESENT == 1 )); then
+  green "Pool aoai-pool (P1=aoai-sea, P2=slm-phi4)"
+else
+  green "Pool aoai-pool (P1=aoai-sea only — SLM skipped)"
+fi
 
 # ============================================================
 # Step 5 — Content Safety backend (optional)
 # ============================================================
 if (( WITH_CS == 1 )); then
   echo "[5/7] Content Safety backend (--with-content-safety)..."
-  # The default workshop Terraform skips the CS account because many
-  # Internal/MCAP subscriptions lack the Content Safety entitlement
-  # (see infra/modules/aoai-singapore/main.tf). To use this flag you
-  # MUST either:
-  #   1) un-comment the CS resource in that module and re-apply, OR
-  #   2) point at an existing CS resource by exporting
-  #      CONTENT_SAFETY_NAME=<name> before running this script.
+  # Prefer CONTENT_SAFETY_NAME env var, then fall back to the Terraform
+  # output `content_safety_name` (set when `deploy_content_safety = true`
+  # in infra/modules/aoai-singapore). The output may be an empty string
+  # if the operator opted out; in that case we soft-skip with a hint.
   CS_NAME="${CONTENT_SAFETY_NAME:-}"
   if [[ -z "$CS_NAME" ]]; then
-    yellow "CONTENT_SAFETY_NAME not set and Terraform output 'content_safety_name' is not exposed (Content Safety is skipped by default in the workshop). Export CONTENT_SAFETY_NAME=<existing-cs-account> to enable, or un-comment the CS resource in infra/modules/aoai-singapore/main.tf. Skipping."
+    CS_NAME=$(terraform -chdir="$INFRA_DIR" output -raw content_safety_name 2>/dev/null || true)
+  fi
+  if [[ -z "$CS_NAME" ]]; then
+    yellow "Content Safety account not deployed (Terraform output 'content_safety_name' empty AND \$CONTENT_SAFETY_NAME unset). Either set deploy_content_safety=true in infra/ and re-apply, or export CONTENT_SAFETY_NAME=<existing-cs-account>. Skipping."
   else
     CS_ID=$(az cognitiveservices account show -g "$RG" -n "$CS_NAME" --query id -o tsv 2>/dev/null || true)
     if [[ -z "$CS_ID" ]]; then
@@ -270,8 +347,12 @@ fi
 # Step 6 — App Insights diagnostic (metrics:true) on the openai API
 # ============================================================
 echo "[6/7] Wire App Insights diagnostic on api/openai (metrics:true)..."
-LOGGER_ID=$(az apim logger list -g "$RG" --service-name "$APIM" \
-  --query "[?loggerType=='applicationInsights'] | [0].id" -o tsv 2>/dev/null || true)
+# `az apim logger list` is not exposed in the Azure CLI surface today —
+# hit the management API instead.
+LOGGER_ID=$(az rest --method get \
+  --url "${MGMT}/loggers?api-version=${API_VER}" \
+  --query "value[?properties.loggerType=='applicationInsights'] | [0].id" \
+  -o tsv 2>/dev/null || true)
 if [[ -z "$LOGGER_ID" ]]; then
   yellow "No App Insights logger found on the APIM service. Create one (Terraform should do this)."
 else
@@ -308,6 +389,29 @@ POLICY_FILE="$POLICIES_DIR/workshop-llm-policy.xml"
 # Build the final XML (start from base bundle, optionally weave in extras)
 WORK=/tmp/policy-final.xml
 cp "$POLICY_FILE" "$WORK"
+
+# When --with-content-safety was NOT passed the `content-safety-sea` backend
+# does not exist and the <llm-content-safety> block makes APIM reject the
+# whole policy with `Backend with id 'content-safety-sea' could not be found`.
+# Strip the block in that case — the base bundle stays the source of truth,
+# this just makes default runs work.
+if (( WITH_CS == 0 )); then
+  echo "  - stripping <llm-content-safety> block (no --with-content-safety)"
+  if (( DRY == 0 )); then
+    python3 - "$WORK" <<'PY'
+import re, sys
+p = sys.argv[1]
+src = open(p, encoding="utf-8").read()
+# Drop the policy element plus the immediately-preceding `<!-- ... -->`
+# comment so we don't leave an orphan comment behind.
+pattern = re.compile(
+    r"\n[ \t]*(?:<!--[^\n]*?-->\s*)?<llm-content-safety[\s\S]*?</llm-content-safety>\s*",
+    re.MULTILINE,
+)
+open(p, "w", encoding="utf-8").write(pattern.sub("\n", src))
+PY
+  fi
+fi
 
 if (( WITH_QUOTA == 1 )); then
   echo "  + folding in quota-by-key-monthly.xml"
